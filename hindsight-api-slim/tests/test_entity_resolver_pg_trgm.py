@@ -19,6 +19,10 @@ from hindsight_api.engine.entity_resolver import EntityResolver
 def _make_conn(pg_trgm_available: bool) -> MagicMock:
     """Create a minimal mock asyncpg connection for the pg_trgm availability check."""
     conn = MagicMock()
+    # Must set backend_type explicitly — MagicMock returns a truthy Mock for
+    # any attribute, so getattr(conn, "backend_type", ...) would return a Mock
+    # instead of the default, causing the Oracle dispatch path to trigger.
+    conn.backend_type = "postgresql"
     conn.fetchval = AsyncMock(return_value=pg_trgm_available)
     conn.fetch = AsyncMock(return_value=[])
     conn.executemany = AsyncMock()

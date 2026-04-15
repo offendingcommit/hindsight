@@ -354,3 +354,98 @@ class SQLDialect(ABC):
             Oracle: "CAST(COLLECT(expr) AS ...)" or JSON_ARRAYAGG.
         """
         ...
+
+    # -- Retrieval query arms ----------------------------------------------
+    # These build complete subquery arms for the UNION ALL retrieval query.
+    # Each database has significantly different syntax for vector search and
+    # full-text search, so these belong in the dialect rather than inline
+    # conditionals in retrieval.py.
+
+    @abstractmethod
+    def build_semantic_arm(
+        self,
+        *,
+        table: str,
+        cols: str,
+        fact_type: str,
+        embedding_param: str,
+        bank_id_param: str,
+        fetch_limit: int,
+        tags_clause: str = "",
+        groups_clause: str = "",
+    ) -> str:
+        """Build a semantic (vector similarity) search subquery arm.
+
+        Returns a complete subquery suitable for UNION ALL that selects
+        matching rows ordered by cosine similarity.
+
+        Args:
+            table: Fully-qualified table name.
+            cols: Column list expression.
+            fact_type: Fact type literal (inlined, not parameterized).
+            embedding_param: Parameter placeholder for query embedding.
+            bank_id_param: Parameter placeholder for bank_id.
+            fetch_limit: Max rows to fetch (over-fetched for HNSW approximation).
+            tags_clause: Optional WHERE clause fragment for tag filtering.
+            groups_clause: Optional WHERE clause fragment for tag group filtering.
+        """
+        ...
+
+    @abstractmethod
+    def build_bm25_arm(
+        self,
+        *,
+        table: str,
+        cols: str,
+        fact_type: str,
+        bank_id_param: str,
+        limit_param: str,
+        text_param: str,
+        tags_clause: str = "",
+        groups_clause: str = "",
+        arm_index: int = 0,
+        text_search_extension: str = "native",
+    ) -> str:
+        """Build a BM25/full-text search subquery arm.
+
+        Returns a complete subquery suitable for UNION ALL that selects
+        matching rows ordered by text relevance score.
+
+        Args:
+            table: Fully-qualified table name.
+            cols: Column list expression.
+            fact_type: Fact type literal (inlined, not parameterized).
+            bank_id_param: Parameter placeholder for bank_id.
+            limit_param: Parameter placeholder for result limit.
+            text_param: Parameter placeholder for the search text.
+            tags_clause: Optional WHERE clause fragment for tag filtering.
+            groups_clause: Optional WHERE clause fragment for tag group filtering.
+            arm_index: Index of this arm in the UNION ALL (used by Oracle for
+                       unique SCORE labels).
+            text_search_extension: Full-text search backend ("native", "vchord",
+                                   "pg_textsearch"). Only relevant for PostgreSQL.
+        """
+        ...
+
+    @abstractmethod
+    def prepare_bm25_text(
+        self,
+        tokens: list[str],
+        query_text: str,
+        *,
+        text_search_extension: str = "native",
+    ) -> str:
+        """Prepare the text parameter value for BM25 search.
+
+        Transforms tokens/query text into the format expected by the backend's
+        full-text search engine.
+
+        Args:
+            tokens: Tokenized query words.
+            query_text: Original query text.
+            text_search_extension: Full-text search backend variant.
+
+        Returns:
+            Prepared text string to bind as the BM25 text parameter.
+        """
+        ...

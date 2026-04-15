@@ -18,6 +18,7 @@ from typing import Optional
 from ...config import get_config
 from ..db_utils import acquire_with_retry
 from ..memory_engine import fq_table
+from ..sql import create_sql_dialect
 from .graph_retrieval import GraphRetriever
 from .link_expansion_retrieval import LinkExpansionRetriever
 from .tags import TagGroup, TagsMatch, build_tag_groups_where_clause, build_tags_where_clause_simple
@@ -146,21 +147,24 @@ async def retrieve_semantic_bm25_combined(
     table = fq_table("memory_units")
 
     config = get_config()
-    # Non-PG backends skip BM25 (requires different full-text search setup)
-    _is_pg = getattr(conn, "backend_type", "postgresql") == "postgresql"
+
+    # Use the SQL dialect to build backend-specific query arms, avoiding
+    # inline if/else branches for each database.
+    backend_type = getattr(conn, "backend_type", "postgresql")
+    dialect = create_sql_dialect(backend_type)
 
     # --- Parameter layout ---
     # $1 = query_emb_str  (semantic arms)
     # $2 = bank_id
-    # When tokens present (and PG backend):
+    # When tokens present:
     #   $3 = limit          (BM25 LIMIT; semantic uses inlined hnsw_fetch literal)
     #   $4 = bm25_text
     #   $5 = tags           (if present)
     #   $6+ = tag_groups params (one per leaf)
-    # When no tokens (or non-PG):
+    # When no tokens:
     #   $3 = tags           (if present)
     #   $4+ = tag_groups params (one per leaf)
-    _include_bm25 = bool(tokens) and _is_pg
+    _include_bm25 = bool(tokens)
     tags_param_idx = 5 if _include_bm25 else 3
     tags_clause = build_tags_where_clause_simple(tags, tags_param_idx, match=tags_match)
 
@@ -171,80 +175,38 @@ async def retrieve_semantic_bm25_combined(
     # --- Semantic UNION ALL arms (one per fact_type) ---
     # Each arm has its own ORDER BY ... LIMIT, enabling the partial HNSW indexes
     # per fact_type instead of forcing a full sequential scan.
-    sem_arms = []
-    for ft in fact_types:
-        if not _is_pg:
-            # Non-PG: use VECTOR_DISTANCE function, FETCH FIRST syntax
-            sem_arms.append(
-                f"SELECT * FROM (SELECT {cols},"
-                f"        1 - VECTOR_DISTANCE(embedding, $1, COSINE) AS similarity,"
-                f"        NULL AS bm25_score,"
-                f"        'semantic' AS source"
-                f" FROM {table}"
-                f" WHERE bank_id = $2"
-                f"   AND fact_type = '{ft}'"
-                f"   AND embedding IS NOT NULL"
-                f"   AND (1 - VECTOR_DISTANCE(embedding, $1, COSINE)) >= 0.3"
-                f"   {tags_clause}"
-                f"   {groups_clause}"
-                f" ORDER BY VECTOR_DISTANCE(embedding, $1, COSINE)"
-                f" FETCH FIRST {hnsw_fetch} ROWS ONLY) t"
-            )
-        else:
-            sem_arms.append(
-                f"(SELECT {cols},"
-                f"        1 - (embedding <=> $1::vector) AS similarity,"
-                f"        NULL::float AS bm25_score,"
-                f"        'semantic' AS source"
-                f" FROM {table}"
-                f" WHERE bank_id = $2"
-                f"   AND fact_type = '{ft}'"
-                f"   AND embedding IS NOT NULL"
-                f"   AND (1 - (embedding <=> $1::vector)) >= 0.3"
-                f"   {tags_clause}"
-                f"   {groups_clause}"
-                f" ORDER BY embedding <=> $1::vector"
-                f" LIMIT {hnsw_fetch})"
-            )
-
-    arms = sem_arms
+    arms = [
+        dialect.build_semantic_arm(
+            table=table,
+            cols=cols,
+            fact_type=ft,
+            embedding_param="$1",
+            bank_id_param="$2",
+            fetch_limit=hnsw_fetch,
+            tags_clause=tags_clause,
+            groups_clause=groups_clause,
+        )
+        for ft in fact_types
+    ]
 
     # --- BM25 UNION ALL arms (one per fact_type, only when tokens present) ---
-    # Non-PG backends skip BM25 (requires platform-specific full-text search setup)
     if _include_bm25:
-        if config.text_search_extension == "vchord":
-            bm25_score_expr = (
-                "search_vector <&> to_bm25query('idx_memory_units_text_search', tokenize($4, 'llmlingua2'))"
-            )
-            bm25_order_by = f"{bm25_score_expr} DESC"
-            bm25_where_filter = ""
-            bm25_text_param: str = query_text
-        elif config.text_search_extension == "pg_textsearch":
-            bm25_score_expr = "-(text <@> to_bm25query($4, 'idx_memory_units_text_search'))"
-            bm25_order_by = "text <@> to_bm25query($4, 'idx_memory_units_text_search') ASC"
-            bm25_where_filter = ""
-            bm25_text_param = query_text
-        else:  # native
-            query_tsquery = " | ".join(tokens)
-            bm25_score_expr = "ts_rank_cd(search_vector, to_tsquery('english', $4))"
-            bm25_order_by = f"{bm25_score_expr} DESC"
-            bm25_where_filter = "AND search_vector @@ to_tsquery('english', $4)"
-            bm25_text_param = query_tsquery
-
-        for ft in fact_types:
+        text_ext = config.text_search_extension
+        bm25_text_param: str = dialect.prepare_bm25_text(tokens, query_text, text_search_extension=text_ext)
+        for i, ft in enumerate(fact_types):
             arms.append(
-                f"(SELECT {cols},"
-                f"        NULL::float AS similarity,"
-                f"        {bm25_score_expr} AS bm25_score,"
-                f"        'bm25' AS source"
-                f" FROM {table}"
-                f" WHERE bank_id = $2"
-                f"   AND fact_type = '{ft}'"
-                f"   {bm25_where_filter}"
-                f"   {tags_clause}"
-                f"   {groups_clause}"
-                f" ORDER BY {bm25_order_by}"
-                f" LIMIT $3)"
+                dialect.build_bm25_arm(
+                    table=table,
+                    cols=cols,
+                    fact_type=ft,
+                    bank_id_param="$2",
+                    limit_param="$3",
+                    text_param="$4",
+                    tags_clause=tags_clause,
+                    groups_clause=groups_clause,
+                    arm_index=i,
+                    text_search_extension=text_ext,
+                )
             )
 
     query = "\nUNION ALL\n".join(arms)

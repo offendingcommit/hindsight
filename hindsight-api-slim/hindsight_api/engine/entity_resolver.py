@@ -215,17 +215,14 @@ class EntityResolver:
         taxonomy_lookup: set[str] | None = None,
     ) -> list[str]:
         if self.entity_lookup == "trigram":
+            if getattr(conn, "backend_type", "postgresql") != "postgresql":
+                # Oracle: use UTL_MATCH for fuzzy entity matching (replaces pg_trgm)
+                return await self._resolve_entities_batch_oracle_fuzzy(conn, bank_id, entities_data, unit_event_date)
             # Auto-detect pg_trgm availability on first call and fall back to
             # "full" strategy if the extension is not installed.  See #626.
             if not self._pg_trgm_checked:
                 self._pg_trgm_checked = True
-                # Non-PG backends don't have pg_trgm — always use 'full' strategy
-                if getattr(conn, "backend_type", "postgresql") != "postgresql":
-                    has_trgm = False
-                else:
-                    has_trgm = await conn.fetchval(
-                        "SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm')"
-                    )
+                has_trgm = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm')")
                 if not has_trgm:
                     logger.warning(
                         "pg_trgm extension is not available — falling back to 'full' "
@@ -346,6 +343,93 @@ class EntityResolver:
         await conn.execute("RESET pg_trgm.similarity_threshold")
 
         # Group candidates by query_text
+        all_candidates: dict[str, list] = {t: [] for t in entity_texts}
+        candidate_ids: set = set()
+        for row in rows:
+            query_text = row["query_text"]
+            all_candidates[query_text].append(
+                (row["id"], row["canonical_name"], row["metadata"], row["last_seen"], row["mention_count"])
+            )
+            candidate_ids.add(row["id"])
+
+        # Fetch co-occurrences only for the candidate entities (not all bank entities)
+        cooccurrence_map: dict[str, set[str]] = {}
+        if candidate_ids:
+            candidate_id_list = list(candidate_ids)
+            cooc_rows = await conn.fetch(
+                f"""
+                SELECT ec.entity_id_1, ec.entity_id_2
+                FROM {fq_table("entity_cooccurrences")} ec
+                WHERE ec.entity_id_1 = ANY($1::uuid[])
+                   OR ec.entity_id_2 = ANY($1::uuid[])
+                """,
+                candidate_id_list,
+            )
+            # Build name lookup for co-occurrence mapping
+            id_to_name = {
+                row["id"]: row["canonical_name"].lower()
+                for cands in all_candidates.values()
+                for row in [{"id": c[0], "canonical_name": c[1]} for c in cands]
+            }
+            for row in cooc_rows:
+                eid1, eid2 = row["entity_id_1"], row["entity_id_2"]
+                if eid1 not in cooccurrence_map:
+                    cooccurrence_map[eid1] = set()
+                if eid2 not in cooccurrence_map:
+                    cooccurrence_map[eid2] = set()
+                if eid2 in id_to_name:
+                    cooccurrence_map[eid1].add(id_to_name[eid2])
+                if eid1 in id_to_name:
+                    cooccurrence_map[eid2].add(id_to_name[eid1])
+
+        return await self._resolve_from_candidates(
+            conn, bank_id, entities_data, unit_event_date, all_candidates, cooccurrence_map
+        )
+
+    async def _resolve_entities_batch_oracle_fuzzy(
+        self, conn: Any, bank_id: str, entities_data: list[dict], unit_event_date: datetime | None
+    ) -> list[str]:
+        """
+        Oracle strategy: fetch similar candidates using UTL_MATCH.JARO_WINKLER_SIMILARITY.
+
+        Replaces pg_trgm for Oracle backends. Uses a threshold of 70 (out of 100)
+        which roughly corresponds to pg_trgm's 0.15 similarity threshold.
+        Falls back to the "full" strategy if UTL_MATCH is unavailable.
+
+        SQL is written in PG-style ($1, $2 params) — the Oracle query rewriter
+        handles conversion automatically.
+        """
+        entity_texts = list(set(e["text"] for e in entities_data))
+        entities_table = fq_table("entities")
+
+        try:
+            # Batch all entity texts into a single query using unnest (rewritten by
+            # the Oracle query layer).  UTL_MATCH.JARO_WINKLER_SIMILARITY returns
+            # 0-100; threshold 70 is roughly equivalent to pg_trgm similarity 0.15.
+            rows = await conn.fetch(
+                f"""
+                SELECT e.id, e.canonical_name, e.metadata, e.last_seen, e.mention_count,
+                       q.query_text
+                FROM unnest($2::text[]) AS q(query_text)
+                JOIN {entities_table} e ON (
+                    e.bank_id = $1
+                    AND UTL_MATCH.JARO_WINKLER_SIMILARITY(LOWER(e.canonical_name), LOWER(q.query_text)) > 70
+                )
+                """,
+                bank_id,
+                entity_texts,
+            )
+        except Exception:
+            # UTL_MATCH may not be available (ORA-06550, ORA-00904, etc.)
+            # Fall back to the "full" strategy which works on any backend.
+            logger.warning(
+                "UTL_MATCH.JARO_WINKLER_SIMILARITY not available on Oracle — "
+                "falling back to 'full' entity lookup strategy."
+            )
+            self.entity_lookup = "full"
+            return await self._resolve_entities_batch_full(conn, bank_id, entities_data, unit_event_date)
+
+        # Group candidates by query_text (same structure as trigram strategy)
         all_candidates: dict[str, list] = {t: [] for t in entity_texts}
         candidate_ids: set = set()
         for row in rows:

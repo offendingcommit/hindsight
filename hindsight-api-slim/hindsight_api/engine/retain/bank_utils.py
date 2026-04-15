@@ -56,8 +56,12 @@ async def create_bank_vector_indexes(conn, bank_id: str, internal_id: str) -> No
     (index build is instant). Idempotent via CREATE INDEX IF NOT EXISTS.
     bank_id is escaped for SQL literal safety (apostrophes doubled).
     """
-    # Backends without partial index support use global vector indexes
-    # created during migrations — nothing to do here.
+    # Oracle 23ai supports HNSW vector indexes but does NOT support partial
+    # indexes (WHERE clause on CREATE INDEX for vector indexes).  We cannot
+    # create per-bank filtered vector indexes on Oracle.  Instead, the global
+    # vector index created during Alembic migrations covers all banks and
+    # fact_types.  This is still effective because Oracle's vector search
+    # applies filter predicates post-index-scan.
     if getattr(conn, "backend_type", "postgresql") != "postgresql":
         return
 
@@ -79,6 +83,7 @@ async def drop_bank_vector_indexes(conn, internal_id: str) -> None:
     Called before the bank row is deleted so internal_id is still known.
     Idempotent via DROP INDEX IF EXISTS.
     """
+    # Oracle uses a single global vector index (no per-bank indexes to drop).
     if getattr(conn, "backend_type", "postgresql") != "postgresql":
         return
 

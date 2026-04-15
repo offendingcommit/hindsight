@@ -112,7 +112,60 @@ def pg0_db_url(db_url, tmp_path_factory, worker_id):
     from hindsight_api.migrations import run_migrations
     run_migrations(url)
 
+    # Clean up stale test data from previous sessions. Per-bank vector indexes
+    # accumulate across runs (each test bank creates 3 HNSW indexes) and
+    # eventually exhaust pg0's shared memory / max_locks_per_transaction.
+    # Only one xdist worker needs to do this.
+    cleanup_lock = root_tmp_dir / f"pg0_cleanup_{pg0_instance_name}.lock"
+    cleanup_done = root_tmp_dir / f"pg0_cleanup_{pg0_instance_name}.done"
+    with filelock.FileLock(str(cleanup_lock)):
+        if not cleanup_done.exists():
+            _cleanup_stale_test_data(url)
+            cleanup_done.write_text("done")
+
     return url
+
+
+def _cleanup_stale_test_data(db_url: str) -> None:
+    """Drop all per-bank vector indexes and test data from previous sessions.
+
+    pg0 persists between test runs, so per-bank HNSW indexes accumulate
+    (3 per bank × thousands of test banks = tens of thousands of indexes).
+    This eventually causes 'out of shared memory' errors because PostgreSQL
+    tracks all indexes in shared lock tables.
+    """
+    import asyncpg
+
+    async def _do_cleanup():
+        conn = await asyncpg.connect(db_url)
+        try:
+            idx_rows = await conn.fetch(
+                "SELECT indexname FROM pg_indexes "
+                "WHERE schemaname = 'public' AND indexname LIKE 'idx_mu_emb_%'"
+            )
+            if idx_rows:
+                for row in idx_rows:
+                    await conn.execute(f'DROP INDEX IF EXISTS public."{row["indexname"]}"')
+
+            # Truncate test data in dependency order
+            for table in [
+                "entity_cooccurrences", "unit_entities", "memory_links",
+                "entities", "memory_units", "chunks", "documents",
+                "mental_models", "directives", "async_operations",
+                "audit_log", "webhooks", "file_storage", "banks",
+            ]:
+                try:
+                    await conn.execute(f"TRUNCATE {table} CASCADE")
+                except Exception:
+                    pass  # Table may not exist yet
+        finally:
+            await conn.close()
+
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(_do_cleanup())
+    finally:
+        loop.close()
 
 
 @pytest.fixture(scope="session")

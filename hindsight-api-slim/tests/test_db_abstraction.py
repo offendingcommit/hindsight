@@ -185,6 +185,43 @@ class TestPostgreSQLDialect:
     def test_array_agg(self, d):
         assert d.array_agg("col") == "array_agg(col)"
 
+    def test_build_semantic_arm(self, d):
+        arm = d.build_semantic_arm(
+            table="schema.memory_units", cols="id, text", fact_type="world",
+            embedding_param="$1", bank_id_param="$2", fetch_limit=100,
+        )
+        assert "1 - (embedding <=> $1::vector)" in arm
+        assert "fact_type = 'world'" in arm
+        assert "LIMIT 100" in arm
+        assert "'semantic' AS source" in arm
+
+    def test_build_bm25_arm_native(self, d):
+        arm = d.build_bm25_arm(
+            table="schema.memory_units", cols="id, text", fact_type="world",
+            bank_id_param="$2", limit_param="$3", text_param="$4",
+        )
+        assert "ts_rank_cd" in arm
+        assert "to_tsquery" in arm
+        assert "'bm25' AS source" in arm
+        assert "LIMIT $3" in arm
+
+    def test_build_bm25_arm_vchord(self, d):
+        arm = d.build_bm25_arm(
+            table="t", cols="id", fact_type="world",
+            bank_id_param="$2", limit_param="$3", text_param="$4",
+            text_search_extension="vchord",
+        )
+        assert "to_bm25query" in arm
+        assert "tokenize" in arm
+
+    def test_prepare_bm25_text_native(self, d):
+        result = d.prepare_bm25_text(["hello", "world"], "hello world")
+        assert result == "hello | world"
+
+    def test_prepare_bm25_text_vchord(self, d):
+        result = d.prepare_bm25_text(["hello", "world"], "hello world", text_search_extension="vchord")
+        assert result == "hello world"
+
 
 # ---------------------------------------------------------------------------
 # OracleDialect tests (no oracledb dependency needed)
@@ -228,6 +265,49 @@ class TestOracleDialect:
 
     def test_current_timestamp(self, d):
         assert d.current_timestamp() == "SYSTIMESTAMP"
+
+    def test_build_semantic_arm(self, d):
+        arm = d.build_semantic_arm(
+            table="memory_units", cols="id, text", fact_type="world",
+            embedding_param=":1", bank_id_param=":2", fetch_limit=100,
+        )
+        assert "VECTOR_DISTANCE" in arm
+        assert "fact_type = 'world'" in arm
+        assert "FETCH FIRST 100 ROWS ONLY" in arm
+        assert "'semantic' AS source" in arm
+
+    def test_build_bm25_arm(self, d):
+        arm = d.build_bm25_arm(
+            table="memory_units", cols="id, text", fact_type="world",
+            bank_id_param=":2", limit_param=":3", text_param=":4",
+            arm_index=0,
+        )
+        assert "CONTAINS" in arm
+        assert "SCORE(10)" in arm
+        assert "'bm25' AS source" in arm
+        assert "FETCH FIRST :3 ROWS ONLY" in arm
+
+    def test_build_bm25_arm_unique_labels(self, d):
+        """Each arm_index produces a unique SCORE label to avoid conflicts in UNION ALL."""
+        arm0 = d.build_bm25_arm(
+            table="t", cols="id", fact_type="world",
+            bank_id_param=":2", limit_param=":3", text_param=":4", arm_index=0,
+        )
+        arm1 = d.build_bm25_arm(
+            table="t", cols="id", fact_type="experience",
+            bank_id_param=":2", limit_param=":3", text_param=":4", arm_index=1,
+        )
+        assert "SCORE(10)" in arm0
+        assert "SCORE(11)" in arm1
+
+    def test_prepare_bm25_text(self, d):
+        result = d.prepare_bm25_text(["hello", "world"], "hello world")
+        assert result == "hello OR world"
+
+    def test_prepare_bm25_text_special_chars_filtered(self, d):
+        result = d.prepare_bm25_text(["hello", "$special", "world"], "hello $special world")
+        assert "$special" not in result
+        assert "hello" in result
 
 
 # ---------------------------------------------------------------------------

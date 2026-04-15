@@ -18,7 +18,7 @@ import re
 import uuid as _uuid_mod
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, NamedTuple
 
 
 class _OracleJSONEncoder(json.JSONEncoder):
@@ -36,6 +36,15 @@ from .base import DatabaseBackend, DatabaseConnection
 from .result import ResultRow
 
 logger = logging.getLogger(__name__)
+
+
+class RewriteResult(NamedTuple):
+    """Result of rewriting a PostgreSQL query to Oracle SQL."""
+
+    query: str
+    ignore_dup: bool
+    returning_cols: list[str] | None
+
 
 # ---------------------------------------------------------------------------
 # Regex patterns for PostgreSQL → Oracle query rewriting
@@ -236,7 +245,7 @@ def _rewrite_upsert_to_merge(query: str) -> str | None:
     return merge_query
 
 
-def _rewrite_pg_to_oracle(query: str) -> tuple[str, bool, list[str] | None]:
+def _rewrite_pg_to_oracle(query: str) -> RewriteResult:
     """Rewrite PostgreSQL-style SQL to Oracle-compatible SQL.
 
     Returns (rewritten_query, ignore_dup, returning_cols).
@@ -276,7 +285,7 @@ def _rewrite_pg_to_oracle(query: str) -> tuple[str, bool, list[str] | None]:
 
     # PG-specific SET SESSION commands → skip (Oracle doesn't need these)
     if re.match(r"\s*SET\s+SESSION\s+CHARACTERISTICS\b", query, re.IGNORECASE):
-        return "SELECT 1 FROM DUAL", False, None
+        return RewriteResult("SELECT 1 FROM DUAL", False, None)
 
     # NOW() → SYSTIMESTAMP
     query = re.sub(r"\bNOW\(\)", "SYSTIMESTAMP", query, flags=re.IGNORECASE)
@@ -452,7 +461,7 @@ def _rewrite_pg_to_oracle(query: str) -> tuple[str, bool, list[str] | None]:
             into_vars = ", ".join(f":ret_{i}" for i in range(len(returning_cols)))
             query = query[: m.start()] + f"RETURNING {ret_cols_str} INTO {into_vars}" + query[m.end() :]
 
-    return query, ignore_dup, returning_cols
+    return RewriteResult(query, ignore_dup, returning_cols)
 
 
 # ---------------------------------------------------------------------------
@@ -737,7 +746,13 @@ class OracleConnection(DatabaseConnection):
         column_types: list[str] | None = None,
         returning: str | None = None,
     ) -> list[ResultRow] | str:
-        """Oracle override: uses row-by-row INSERT (no unnest support)."""
+        """Oracle override: uses executemany for bulk inserts (no unnest support).
+
+        The non-RETURNING path uses executemany() which batches network round-trips
+        efficiently via oracledb's array bind optimization. The RETURNING path must
+        use row-by-row inserts because Oracle's RETURNING ... INTO requires individual
+        cursor execution to read back output bind variables.
+        """
         col_list = ", ".join(columns)
         n_cols = len(columns)
         placeholders = ", ".join(f"${i + 1}" for i in range(n_cols))

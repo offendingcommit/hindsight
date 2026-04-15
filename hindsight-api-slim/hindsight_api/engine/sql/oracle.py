@@ -183,3 +183,80 @@ class OracleDialect(SQLDialect):
 
     def array_agg(self, expr: str) -> str:
         return f"JSON_ARRAYAGG({expr})"
+
+    # -- Retrieval query arms ----------------------------------------------
+
+    def build_semantic_arm(
+        self,
+        *,
+        table: str,
+        cols: str,
+        fact_type: str,
+        embedding_param: str,
+        bank_id_param: str,
+        fetch_limit: int,
+        tags_clause: str = "",
+        groups_clause: str = "",
+    ) -> str:
+        # Oracle 23ai: VECTOR_DISTANCE for cosine, FETCH FIRST for limiting.
+        # Wrapped in a derived table to work within UNION ALL.
+        return (
+            f"SELECT * FROM (SELECT {cols},"
+            f"        1 - VECTOR_DISTANCE(embedding, {embedding_param}, COSINE) AS similarity,"
+            f"        NULL AS bm25_score,"
+            f"        'semantic' AS source"
+            f" FROM {table}"
+            f" WHERE bank_id = {bank_id_param}"
+            f"   AND fact_type = '{fact_type}'"
+            f"   AND embedding IS NOT NULL"
+            f"   AND (1 - VECTOR_DISTANCE(embedding, {embedding_param}, COSINE)) >= 0.3"
+            f"   {tags_clause}"
+            f"   {groups_clause}"
+            f" ORDER BY VECTOR_DISTANCE(embedding, {embedding_param}, COSINE)"
+            f" FETCH FIRST {fetch_limit} ROWS ONLY) t"
+        )
+
+    def build_bm25_arm(
+        self,
+        *,
+        table: str,
+        cols: str,
+        fact_type: str,
+        bank_id_param: str,
+        limit_param: str,
+        text_param: str,
+        tags_clause: str = "",
+        groups_clause: str = "",
+        arm_index: int = 0,
+        text_search_extension: str = "native",
+    ) -> str:
+        # Oracle Text: CONTAINS() / SCORE() with the CTXSYS.CONTEXT index.
+        # Each arm gets a unique SCORE label (10 + arm_index) to avoid
+        # conflicts within the UNION ALL.
+        label = 10 + arm_index
+        return (
+            f"SELECT * FROM (SELECT {cols},"
+            f"        NULL AS similarity,"
+            f"        SCORE({label}) AS bm25_score,"
+            f"        'bm25' AS source"
+            f" FROM {table}"
+            f" WHERE bank_id = {bank_id_param}"
+            f"   AND fact_type = '{fact_type}'"
+            f"   AND CONTAINS(text, {text_param}, {label}) > 0"
+            f"   {tags_clause}"
+            f"   {groups_clause}"
+            f" ORDER BY SCORE({label}) DESC"
+            f" FETCH FIRST {limit_param} ROWS ONLY) t{arm_index}"
+        )
+
+    def prepare_bm25_text(
+        self,
+        tokens: list[str],
+        query_text: str,
+        *,
+        text_search_extension: str = "native",
+    ) -> str:
+        # Oracle Text: escape special chars and join with OR.
+        _oracle_special = set("&|!{}()[]~*?%-$>")
+        safe_tokens = [t for t in tokens if not any(c in _oracle_special for c in t)]
+        return " OR ".join(safe_tokens) if safe_tokens else tokens[0]

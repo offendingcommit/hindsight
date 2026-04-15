@@ -122,7 +122,10 @@ async def store_chunks_batch(conn, bank_id: str, document_id: str, chunks: list[
             content_hashes,
         )
     else:
-        # Oracle: row-by-row via bulk_insert_from_arrays (executemany, no unnest)
+        # Oracle: uses bulk_insert_from_arrays which delegates to executemany().
+        # Oracle's thin-client executemany with array binds is already well-optimized —
+        # it batches network round-trips into a single call, so INSERT ALL or other
+        # patterns would not provide a meaningful improvement.  This is sufficient.
         await conn.bulk_insert_from_arrays(
             fq_table("chunks"),
             ["chunk_id", "document_id", "bank_id", "chunk_text", "chunk_index", "content_hash"],

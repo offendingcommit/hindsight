@@ -136,3 +136,89 @@ class PostgreSQLDialect(SQLDialect):
 
     def array_agg(self, expr: str) -> str:
         return f"array_agg({expr})"
+
+    # -- Retrieval query arms ----------------------------------------------
+
+    def build_semantic_arm(
+        self,
+        *,
+        table: str,
+        cols: str,
+        fact_type: str,
+        embedding_param: str,
+        bank_id_param: str,
+        fetch_limit: int,
+        tags_clause: str = "",
+        groups_clause: str = "",
+    ) -> str:
+        return (
+            f"(SELECT {cols},"
+            f"        1 - (embedding <=> {embedding_param}::vector) AS similarity,"
+            f"        NULL::float AS bm25_score,"
+            f"        'semantic' AS source"
+            f" FROM {table}"
+            f" WHERE bank_id = {bank_id_param}"
+            f"   AND fact_type = '{fact_type}'"
+            f"   AND embedding IS NOT NULL"
+            f"   AND (1 - (embedding <=> {embedding_param}::vector)) >= 0.3"
+            f"   {tags_clause}"
+            f"   {groups_clause}"
+            f" ORDER BY embedding <=> {embedding_param}::vector"
+            f" LIMIT {fetch_limit})"
+        )
+
+    def build_bm25_arm(
+        self,
+        *,
+        table: str,
+        cols: str,
+        fact_type: str,
+        bank_id_param: str,
+        limit_param: str,
+        text_param: str,
+        tags_clause: str = "",
+        groups_clause: str = "",
+        arm_index: int = 0,
+        text_search_extension: str = "native",
+    ) -> str:
+        if text_search_extension == "vchord":
+            bm25_score_expr = (
+                f"search_vector <&> to_bm25query('idx_memory_units_text_search', tokenize({text_param}, 'llmlingua2'))"
+            )
+            bm25_order_by = f"{bm25_score_expr} DESC"
+            bm25_where_filter = ""
+        elif text_search_extension == "pg_textsearch":
+            bm25_score_expr = f"-({text_param} <@> to_bm25query({text_param}, 'idx_memory_units_text_search'))"
+            bm25_order_by = f"text <@> to_bm25query({text_param}, 'idx_memory_units_text_search') ASC"
+            bm25_where_filter = ""
+        else:  # native tsvector
+            bm25_score_expr = f"ts_rank_cd(search_vector, to_tsquery('english', {text_param}))"
+            bm25_order_by = f"{bm25_score_expr} DESC"
+            bm25_where_filter = f"AND search_vector @@ to_tsquery('english', {text_param})"
+
+        return (
+            f"(SELECT {cols},"
+            f"        NULL::float AS similarity,"
+            f"        {bm25_score_expr} AS bm25_score,"
+            f"        'bm25' AS source"
+            f" FROM {table}"
+            f" WHERE bank_id = {bank_id_param}"
+            f"   AND fact_type = '{fact_type}'"
+            f"   {bm25_where_filter}"
+            f"   {tags_clause}"
+            f"   {groups_clause}"
+            f" ORDER BY {bm25_order_by}"
+            f" LIMIT {limit_param})"
+        )
+
+    def prepare_bm25_text(
+        self,
+        tokens: list[str],
+        query_text: str,
+        *,
+        text_search_extension: str = "native",
+    ) -> str:
+        if text_search_extension in ("vchord", "pg_textsearch"):
+            return query_text
+        # native tsvector: join tokens with OR operator
+        return " | ".join(tokens)
