@@ -23,6 +23,8 @@ import {
 import { Constellation } from "./constellation";
 import { convertHindsightGraphData, GraphNode } from "./graph-2d";
 
+type EntityGraphResponse = Awaited<ReturnType<typeof client.getEntityGraph>>;
+
 interface Entity {
   id: string;
   canonical_name: string;
@@ -45,7 +47,7 @@ export function EntitiesView() {
   const [selectedEntity, setSelectedEntity] = useState<EntityDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("relations");
-  const [graphData, setGraphData] = useState<any>(null);
+  const [graphData, setGraphData] = useState<EntityGraphResponse | null>(null);
   const [graphLoading, setGraphLoading] = useState(false);
 
   // Pagination state
@@ -99,7 +101,7 @@ export function EntitiesView() {
     if (!currentBank) return;
     setGraphLoading(true);
     try {
-      const result: any = await client.getEntityGraph({
+      const result = await client.getEntityGraph({
         bank_id: currentBank,
         limit: 2000,
         min_count: 1,
@@ -164,10 +166,7 @@ export function EntitiesView() {
   // edges. Lets color encode "fresh vs stale" while size encodes co-occurrence
   // volume, so the two axes stay orthogonal.
   const recencyLookup = useMemo(() => {
-    type Edge = {
-      data: { source: string; target: string; lastCooccurred?: string | null };
-    };
-    const edges = (graphData?.edges as Edge[] | undefined) || [];
+    const edges = graphData?.edges || [];
     if (!edges.length) return null;
     const times = new Map<string, number>();
     let minT = Infinity;

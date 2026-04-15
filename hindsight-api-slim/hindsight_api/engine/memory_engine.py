@@ -6033,9 +6033,14 @@ class MemoryEngine(MemoryEngineInterface):
                 limit,
             )
 
-        nodes_by_id: dict[str, dict[str, Any]] = {}
+        @dataclass
+        class _EntityNode:
+            id: str
+            label: str
+            mention_count: int
+
+        nodes_by_id: dict[str, _EntityNode] = {}
         edges: list[dict[str, Any]] = []
-        max_mentions = 0
         for row in edge_rows:
             for eid, name, mentions in (
                 (row["entity_id_1"], row["name_1"], row["mention_count_1"]),
@@ -6043,13 +6048,7 @@ class MemoryEngine(MemoryEngineInterface):
             ):
                 key = str(eid)
                 if key not in nodes_by_id:
-                    nodes_by_id[key] = {
-                        "id": key,
-                        "label": name,
-                        "mention_count": mentions or 0,
-                    }
-                    if (mentions or 0) > max_mentions:
-                        max_mentions = mentions or 0
+                    nodes_by_id[key] = _EntityNode(id=key, label=name, mention_count=mentions or 0)
 
             from_id = str(row["entity_id_1"])
             to_id = str(row["entity_id_2"])
@@ -6072,10 +6071,10 @@ class MemoryEngine(MemoryEngineInterface):
         nodes = [
             {
                 "data": {
-                    "id": n["id"],
-                    "label": n["label"],
-                    "mentionCount": n["mention_count"],
-                    "color": "#42a5f5" if n["mention_count"] > 1 else "#90caf9",
+                    "id": n.id,
+                    "label": n.label,
+                    "mentionCount": n.mention_count,
+                    "color": "#42a5f5" if n.mention_count > 1 else "#90caf9",
                 }
             }
             for n in nodes_by_id.values()
