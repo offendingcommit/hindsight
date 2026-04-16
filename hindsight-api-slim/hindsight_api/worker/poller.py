@@ -143,11 +143,36 @@ class WorkerPoller:
         return [t.schema if t.schema != DEFAULT_DATABASE_SCHEMA else None for t in tenants]
 
     async def _scan_active_schemas(self, schemas: list[str | None]) -> set[str | None]:
-        """Find which schemas have pending work. Uses a server-side
-        PL/pgSQL function (schemas_with_pending_work) that runs all
-        EXISTS checks in a single DB round-trip (~200ms for 1400+
-        schemas). Falls back to per-schema Python queries if the
-        function doesn't exist.
+        """Find which schemas have pending work.
+
+        Tries a server-side PL/pgSQL function first (single DB round-trip,
+        ~200ms for 1400+ schemas). Falls back to per-schema Python EXISTS
+        queries if the function is not installed (~4ms each).
+
+        The server-side function should be installed in the ``public``
+        schema as::
+
+            CREATE OR REPLACE FUNCTION public.schemas_with_pending_work()
+            RETURNS SETOF text AS $$
+            DECLARE
+              r RECORD; has_work BOOLEAN;
+            BEGIN
+              FOR r IN SELECT nspname FROM pg_namespace
+                       WHERE nspname LIKE 'tenant_%' LOOP
+                BEGIN
+                  EXECUTE format(
+                    'SELECT EXISTS(SELECT 1 FROM %I.async_operations '
+                    'WHERE status = ''pending'' '
+                    'AND task_payload IS NOT NULL LIMIT 1)',
+                    r.nspname) INTO has_work;
+                  IF has_work THEN RETURN NEXT r.nspname; END IF;
+                EXCEPTION WHEN OTHERS THEN NULL;
+                END;
+              END LOOP;
+            END $$ LANGUAGE plpgsql STABLE;
+
+        In hindsight-cloud deployments this is installed by a Helm hook
+        job alongside ``total_pending_tasks()``.
         """
         async with self._pool.acquire() as conn:
             try:
