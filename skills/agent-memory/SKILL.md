@@ -1,11 +1,11 @@
 ---
 name: agent-memory
-description: Build and maintain your own procedural memory as files in the workspace. Use whenever you learn something worth remembering across sessions — a user preference, a procedure that worked, a rule the user stated, a source to track, a decision and its rationale, or any knowledge you'd want available next time. Also use when the user says "remember this", "don't forget", "keep track of", or asks you to update something you previously noted.
+description: Build and maintain your own procedural memory as files. Use whenever you learn something worth remembering across sessions — a user preference, a procedure that worked, a rule the user stated, a source to track, a decision and its rationale, or any knowledge you'd want available next time. Also use when the user says "remember this", "don't forget", "keep track of", or asks you to update something you previously noted. Also use after every completed task run (news feed, sweep, report) to log what you delivered.
 ---
 
 # Agent Memory
 
-You have a dedicated memory directory outside your workspace. It is yours — not shared with the harness, not inside any skill folder, not subject to workspace resets. Use it to build a growing wiki of everything you need to remember across sessions. Each file is one topic. You decide what's worth tracking.
+You have a dedicated, version-controlled memory directory outside your workspace. It is yours — not shared with the harness, not inside any skill folder, not subject to workspace resets. Use it to build a growing wiki of everything you need to remember across sessions. Each file is one topic. You decide what's worth tracking.
 
 ## Where files live
 
@@ -13,13 +13,18 @@ You have a dedicated memory directory outside your workspace. It is yours — no
 ~/.agent-memory/<agent-name>/
 ```
 
-`<agent-name>` is your agent id (e.g. `news-feed`, `discord-watch`). If you don't know your agent name, check the session key or ask the user. Always use the absolute expanded path (`/Users/<user>/.agent-memory/<agent-name>/`) when reading/writing — never a relative path, since your working directory may vary.
+`<agent-name>` is your agent id (e.g. `news-feed`, `discord-watch`). If you don't know your agent name, check the session key or ask the user. Always use the absolute expanded path when reading/writing — never a relative path, since your working directory may vary.
 
-Create the directory on first use if it doesn't exist.
+Create the directory and initialize git on first use:
+
+```bash
+mkdir -p ~/.agent-memory/<agent-name>
+cd ~/.agent-memory/<agent-name> && git init 2>/dev/null
+```
 
 ## When to write
 
-Two mandatory triggers. Both fire after the user's request is fulfilled, never mid-task.
+Two mandatory triggers. Both fire AFTER the user's response is delivered — never mid-task, never before the user sees the answer.
 
 ### Trigger 1: You learned something (knowledge files)
 
@@ -50,6 +55,14 @@ This is how you deduplicate across runs and answer "what did you show me yesterd
 - Ephemeral task state (use the conversation for that)
 - Things already in the skill files or BRIEF.md
 - Trivial acknowledgements ("got it", "ok")
+
+### Write order (mandatory)
+
+1. Respond to the user's request (the actual task output)
+2. Then — visibly separated — update memory files
+3. Then commit to git (see "Version control" below)
+
+The user should see the answer before you start writing memory. Memory updates are a visible post-script, not a silent side-effect.
 
 ## Two kinds of memory files
 
@@ -103,9 +116,9 @@ Lowercase with hyphens. Short, descriptive, greppable. Knowledge files are named
 
 If a topic file doesn't exist yet, create it. If it already exists, update it in place (for knowledge files) or append to it (for activity logs).
 
-## File format
+## File format (knowledge files)
 
-Every file follows this structure:
+Every knowledge file follows this structure:
 
 ```markdown
 # <Topic Name>
@@ -143,25 +156,86 @@ Example:
 - [2026-04-15] User said "no product PR, more papers" — later clarified "actually no papers either, just dev product news"
 - [2026-04-15] User requested RSS-first sourcing after web_search returned stale results
 - [2026-04-15] User asked to always include OpenClaw releases when available
-- [2026-04-16] User changed window from 24h to 7 days
+- ~~[2026-04-15] User said "last 24h"~~ superseded by:
+- [2026-04-16] User changed window to 7 days
 ```
 
 ## How to use memory at the start of a turn
 
-At the start of any task, check if relevant memory files exist:
+### Step 1: Read the index
+
+```bash
+cat ~/.agent-memory/<agent-name>/_index.md 2>/dev/null
+```
+
+The index is a one-line-per-file summary you maintain. If it exists, scan it to decide which files are relevant to the current request. Read only those files — not everything.
+
+If the index doesn't exist yet, fall back to listing all files and reading the ones whose names look relevant:
 
 ```bash
 ls ~/.agent-memory/<agent-name>/ 2>/dev/null
 ```
 
-If files exist that might be relevant to the current request, read them before acting. They are your accumulated knowledge — treat them as ground truth unless the user contradicts them in this conversation (in which case, update the file).
+### Step 2: Read relevant files
+
+Read the files the index pointed you to. Treat their content as ground truth unless the user contradicts them in this conversation (in which case, update the file after responding).
+
+### Step 3: For task runs, also read the activity log
+
+Before producing output (a feed, a sweep, a report), read the activity log for that task type. Use it to deduplicate against recent deliveries.
+
+## Index file
+
+Maintain `_index.md` in the memory directory. Update it every time you create, rename, or delete a memory file. Format:
+
+```markdown
+# Memory Index
+
+- `preferences.md` — news feed preferences: format, sources, topics, cap, window
+- `rss-procedure.md` — how to fetch RSS/Atom feeds reliably
+- `user-setup.md` — user's local Hindsight + OpenClaw setup details
+- `source-list.md` — allowed and blocked news sources
+- `feed-log.md` — activity log: what was delivered each run (for dedup)
+```
+
+This lets you scan one small file instead of reading every memory file on every turn.
+
+## Version control
+
+The memory directory is a git repo. After every batch of writes in a turn, commit:
+
+```bash
+cd ~/.agent-memory/<agent-name> && git add -A && git commit -m "<short description of what changed>" 2>/dev/null
+```
+
+Use a descriptive commit message: "updated preferences: cap changed from 5 to 10" or "feed-log: added 2026-04-17 delivery". This gives full diff history, rollback capability, and answers "when did this change" without relying solely on the evidence section.
+
+Don't push anywhere — this is a local repo. The user can inspect it with `git log` if they want history.
+
+## Periodic self-review
+
+Every ~10 sessions, or when the user explicitly asks you to review/clean up memory, do a consolidation pass:
+
+1. Read ALL memory files (not just the ones relevant to the current task)
+2. Check for:
+   - **Contradictions** — two files stating conflicting facts. Resolve based on evidence dates (newer wins) and ask the user if ambiguous.
+   - **Duplicates** — same knowledge in two files. Merge into one, delete the other, update the index.
+   - **Overgrown files** — anything over ~50 lines. Split into sub-topics.
+   - **Stale entries** — activity log entries older than 30 days. Prune them.
+   - **Missing evidence** — facts without evidence entries. Either add the evidence if you remember the source, or flag them to the user as unverified.
+3. Commit the cleanup as a single git commit: `"memory review: dedup, prune, resolve contradictions"`
+
+You can also trigger this yourself if you notice inconsistencies during normal reads.
 
 ## Rules
 
 1. **One file per topic.** Don't dump everything into one file. If two concerns are distinct (e.g. "user preferences" vs "known procedures"), they get separate files.
 2. **Evidence is mandatory.** Never write a fact without an evidence entry explaining where it came from. If you can't cite evidence, you're guessing — ask the user instead.
 3. **Update, don't append.** When a fact changes, rewrite the fact in place and add a new evidence entry. The file should always read as the *current* state of knowledge, not a log.
-4. **Supersede, don't delete.** When old evidence is contradicted, mark it `~~superseded~~` in the evidence section. Don't remove it — the history matters.
-5. **Write after acting, not before.** Finish the user's task first, then update memory. Don't interrupt the flow to take notes.
+4. **Supersede, don't delete.** When old evidence is contradicted, mark it `~~superseded~~` in the evidence section. Don't remove it — the history matters (git has the full diff, but inline markers help at a glance).
+5. **Respond first, write second.** Deliver the user's answer before touching any memory file. Memory updates are a visible post-script.
 6. **Keep files short.** A memory file that exceeds ~50 lines is probably covering too many topics. Split it.
-7. **Date every evidence entry.** Use `[YYYY-MM-DD]` format. If you don't know today's date, ask the harness or omit the date rather than guess.
+7. **Date every evidence entry.** Use `[YYYY-MM-DD]` format.
+8. **Maintain the index.** Update `_index.md` whenever you create, rename, or delete a file.
+9. **Commit after every write.** `git add -A && git commit -m "..."` after each batch of memory updates in a turn.
+10. **Skip writes when nothing changed.** If a turn taught you nothing new and you didn't produce task output, don't write. Not every turn needs a memory update.
