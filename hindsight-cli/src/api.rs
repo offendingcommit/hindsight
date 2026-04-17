@@ -817,14 +817,31 @@ impl ApiClient {
     pub fn list_mental_models(
         &self,
         bank_id: &str,
+        kb: Option<&str>,
         _verbose: bool,
     ) -> Result<types::MentalModelListResponse> {
         self.runtime.block_on(async {
-            let response = self
-                .client
-                .list_mental_models(bank_id, None, None, None, None, None, None)
-                .await?;
-            Ok(response.into_inner())
+            if let Some(kb_id) = kb {
+                // Use raw HTTP to pass kb filter (not in generated client)
+                let url = format!(
+                    "{}/v1/default/banks/{}/mental-models?kb={}&detail=full",
+                    self.base_url, bank_id, kb_id
+                );
+                let mut req = self.http_client.get(&url);
+                // Auth already in http_client default headers
+                if false {
+                    // unused
+                }
+                let resp = req.send().await?;
+                let body: types::MentalModelListResponse = resp.json().await?;
+                Ok(body)
+            } else {
+                let response = self
+                    .client
+                    .list_mental_models(bank_id, None, None, None, None, None, None)
+                    .await?;
+                Ok(response.into_inner())
+            }
         })
     }
 
@@ -847,14 +864,38 @@ impl ApiClient {
         &self,
         bank_id: &str,
         request: &types::CreateMentalModelRequest,
+        kb_id: Option<&str>,
         _verbose: bool,
     ) -> Result<types::CreateMentalModelResponse> {
         self.runtime.block_on(async {
-            let response = self
-                .client
-                .create_mental_model(bank_id, None, request)
-                .await?;
-            Ok(response.into_inner())
+            if let Some(kb) = kb_id {
+                // Use raw HTTP to pass kb_id (not in generated client types)
+                let url = format!(
+                    "{}/v1/default/banks/{}/mental-models",
+                    self.base_url, bank_id
+                );
+                let mut body = serde_json::to_value(request)?;
+                body["kb_id"] = serde_json::Value::String(kb.to_string());
+                let mut req = self.http_client.post(&url).json(&body);
+                // Auth already in http_client default headers
+                if false {
+                    // unused
+                }
+                let resp = req.send().await?;
+                if !resp.status().is_success() {
+                    let status = resp.status();
+                    let text = resp.text().await.unwrap_or_default();
+                    anyhow::bail!("HTTP {}: {}", status, text);
+                }
+                let result: types::CreateMentalModelResponse = resp.json().await?;
+                Ok(result)
+            } else {
+                let response = self
+                    .client
+                    .create_mental_model(bank_id, None, request)
+                    .await?;
+                Ok(response.into_inner())
+            }
         })
     }
 

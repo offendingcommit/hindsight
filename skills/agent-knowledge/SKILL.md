@@ -24,7 +24,7 @@ curl -sS "http://localhost:8888/v1/default/banks/nicolo-news-feed/knowledge-base
     -d '{"id":"news-feed","name":"News Feed KB","mission":"User preferences and procedures for the news feed agent","auto_create":false}'
 
 # 2. List your topic pages
-curl -sS "http://localhost:8888/v1/default/banks/nicolo-news-feed/mental-models?kb=news-feed&detail=content"
+/Users/nicoloboschi/dev/hindsight-wt3/hindsight-cli/target/release/hindsight mental-model list nicolo-news-feed --kb news-feed --output json
 ```
 
 Read the pages relevant to the current task. If the list is empty, that's fine — create pages as you learn things (see below).
@@ -33,7 +33,7 @@ Read the pages relevant to the current task. If the list is empty, that's fine �
 
 ```bash
 # List all pages (names + content)
-curl -sS "http://localhost:8888/v1/default/banks/nicolo-news-feed/mental-models?kb=news-feed&detail=content"
+/Users/nicoloboschi/dev/hindsight-wt3/hindsight-cli/target/release/hindsight mental-model list nicolo-news-feed --kb news-feed --output json
 
 # Read one specific page
 /Users/nicoloboschi/dev/hindsight-wt3/hindsight-cli/target/release/hindsight mental-model get nicolo-news-feed <page_id> --output json
@@ -47,30 +47,24 @@ curl -sS "http://localhost:8888/v1/default/banks/nicolo-news-feed/mental-models?
 When you discover a recurring topic worth tracking across sessions — user preferences, a procedure that works, a source list — create a page for it. Use your judgment, same as you would with a local file.
 
 ```bash
-curl -sS -X POST "http://localhost:8888/v1/default/banks/nicolo-news-feed/mental-models" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "id": "<page-id>",
-    "name": "<Page Name>",
-    "source_query": "<a question that produces the page content from observations>",
-    "trigger": {"refresh_after_consolidation": true, "exclude_mental_models": true},
-    "kb_id": "news-feed"
-  }'
+/Users/nicoloboschi/dev/hindsight-wt3/hindsight-cli/target/release/hindsight mental-model create nicolo-news-feed \
+  "<Page Name>" \
+  "<source_query: a question that produces the page content from observations>" \
+  --id <page-id> \
+  --kb news-feed \
+  --trigger-refresh-after-consolidation
 ```
 
 **The `source_query` is the key field.** It's a question the system will re-ask on every consolidation to rebuild the page content from your accumulated observations. Write it as a comprehensive question about what the user wants.
 
 Example:
 ```bash
-curl -sS -X POST "http://localhost:8888/v1/default/banks/nicolo-news-feed/mental-models" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "id": "feed-sources",
-    "name": "Feed Source Preferences",
-    "source_query": "What RSS feeds, websites, and sources does the user want included or excluded from their AI news feed, and in what priority order?",
-    "trigger": {"refresh_after_consolidation": true, "exclude_mental_models": true},
-    "kb_id": "news-feed"
-  }'
+/Users/nicoloboschi/dev/hindsight-wt3/hindsight-cli/target/release/hindsight mental-model create nicolo-news-feed \
+  "Feed Source Preferences" \
+  "What RSS feeds, websites, and sources does the user want included or excluded from their AI news feed, and in what priority order?" \
+  --id feed-sources \
+  --kb news-feed \
+  --trigger-refresh-after-consolidation
 ```
 
 **When to create a page:**

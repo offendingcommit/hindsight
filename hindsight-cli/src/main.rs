@@ -962,6 +962,10 @@ enum MentalModelCommands {
     List {
         /// Bank ID
         bank_id: String,
+
+        /// Filter by knowledge base ID
+        #[arg(long)]
+        kb: Option<String>,
     },
 
     /// Get a specific mental model
@@ -999,6 +1003,10 @@ enum MentalModelCommands {
         /// Refresh this mental model automatically after observations consolidation
         #[arg(long)]
         trigger_refresh_after_consolidation: bool,
+
+        /// Knowledge base ID to associate this mental model with
+        #[arg(long)]
+        kb: Option<String>,
     },
 
     /// Update a mental model
@@ -1757,8 +1765,8 @@ fn run() -> Result<()> {
 
         // Mental model commands
         Commands::MentalModel(mm_cmd) => match mm_cmd {
-            MentalModelCommands::List { bank_id } => {
-                commands::mental_model::list(&client, &bank_id, verbose, output_format)
+            MentalModelCommands::List { bank_id, kb } => {
+                commands::mental_model::list(&client, &bank_id, kb.as_deref(), verbose, output_format)
             }
             MentalModelCommands::Get {
                 bank_id,
@@ -1778,6 +1786,7 @@ fn run() -> Result<()> {
                 tags,
                 max_tokens,
                 trigger_refresh_after_consolidation,
+                kb,
             } => commands::mental_model::create(
                 &client,
                 &bank_id,
@@ -1787,6 +1796,7 @@ fn run() -> Result<()> {
                 tags,
                 max_tokens,
                 trigger_refresh_after_consolidation,
+                kb.as_deref(),
                 verbose,
                 output_format,
             ),
