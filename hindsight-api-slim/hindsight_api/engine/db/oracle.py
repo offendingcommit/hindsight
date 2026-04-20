@@ -522,7 +522,12 @@ class OracleConnection(DatabaseConnection):
         Always uses dict-based named binding (:1, :2, ...) because oracledb's
         positional tuple binding fails when a placeholder like :1 appears
         multiple times in the query (counts references, not distinct placeholders).
+
+        JSON-serialized strings (from lists/dicts) are explicitly typed as CLOB
+        via setinputsizes so Oracle doesn't reject short JSON like '[]' or '{}'
+        that would otherwise bind as VARCHAR2.
         """
+        oracledb = _import_oracledb()
         converted = _convert_args(args) if args else ()
 
         if not converted and returning_cols is None:
@@ -530,11 +535,19 @@ class OracleConnection(DatabaseConnection):
 
         # Always use named params dict for Oracle
         params: dict[str, Any] = {}
+        input_sizes: dict[str, Any] = {}
         for i, val in enumerate(converted):
-            params[str(i + 1)] = val
+            key = str(i + 1)
+            params[key] = val
+            # JSON-serialized values (from _convert_arg on list/dict) must be
+            # bound as CLOB — Oracle's thin driver defaults short strings to
+            # VARCHAR2 which fails when the target column is CLOB.
+            if isinstance(val, str) and val and val[0] in ("{", "["):
+                input_sizes[key] = oracledb.DB_TYPE_CLOB
+        if input_sizes:
+            cursor.setinputsizes(**input_sizes)
 
         if returning_cols is not None:
-            oracledb = _import_oracledb()
             # Column names that are known to be numeric
             _NUMERIC_COLS = {
                 "max_tokens",
