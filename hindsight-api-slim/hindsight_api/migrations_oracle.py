@@ -218,6 +218,8 @@ _DDL_TABLES = [
         max_tokens        NUMBER(10)     DEFAULT 2048 NOT NULL,
         "trigger"         CLOB           DEFAULT '{"refresh_after_consolidation":false}' NOT NULL
                                          CONSTRAINT mm_trigger_json CHECK ("trigger" IS JSON),
+        structured_content CLOB          CONSTRAINT mm_sc_json CHECK (structured_content IS JSON OR structured_content IS NULL),
+        last_refreshed_source_query CLOB,
         reflect_response  CLOB           CONSTRAINT mm_reflect_resp_json CHECK (reflect_response IS JSON OR reflect_response IS NULL),
         history           CLOB           DEFAULT '[]' NOT NULL
                                          CONSTRAINT mm_history_json CHECK (history IS JSON),

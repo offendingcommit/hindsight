@@ -202,8 +202,6 @@ class TestOracleHTTP:
                 json={"items": [{"content": "Bank setup for mental model test.", "context": "test"}]},
             )
 
-            # Create — may return 500 due to async refresh query limitations on Oracle.
-            # The creation itself works; the 500 comes from the refresh task.
             resp = await api_client.post(
                 f"/v1/default/banks/{bank_id}/mental-models",
                 json={
@@ -212,12 +210,10 @@ class TestOracleHTTP:
                     "tags": ["http-test"],
                 },
             )
-            # Accept 200 (success) or 500 (refresh task failure, known limitation)
-            assert resp.status_code in (200, 500)
-            if resp.status_code == 200:
-                body = resp.json()
-                model_id = body.get("id") or body.get("mental_model_id") or body.get("operation_id")
-                assert model_id is not None
+            assert resp.status_code == 200, f"Mental model creation failed: {resp.text}"
+            body = resp.json()
+            model_id = body.get("id") or body.get("mental_model_id") or body.get("operation_id")
+            assert model_id is not None
 
             # List — should work regardless of creation outcome
             resp = await api_client.get(f"/v1/default/banks/{bank_id}/mental-models")

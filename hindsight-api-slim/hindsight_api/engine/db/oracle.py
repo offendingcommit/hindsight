@@ -9,6 +9,12 @@ query strings. Also auto-converts Python UUID objects to bytes for RAW(16)
 columns and rewrites PG-specific SQL patterns.
 
 Requires: python-oracledb (thin mode — pure Python, no Oracle client needed).
+
+Known limitations (single-tenant OSS only):
+- Multi-tenant schema isolation (CURRENT_SCHEMA per session) is not yet implemented.
+- task_backend, worker/poller, webhooks/manager, engine/audit, and config_resolver
+  still use raw asyncpg pool APIs with PG-specific SQL. These paths need Oracle
+  implementations before Oracle can support async operations and background workers.
 """
 
 import datetime
