@@ -193,13 +193,41 @@ def _convert_row_from_oracle(columns: list[str], row: tuple) -> tuple:
 # ---------------------------------------------------------------------------
 
 
+# Match INSERT ... VALUES (...) ON CONFLICT (...) DO UPDATE SET ...
+# The VALUES group supports up to two levels of nested parentheses to handle
+# expressions like COALESCE($7, NOW()) inside the values list.
 _UPSERT_RE = re.compile(
     r"INSERT\s+INTO\s+(\S+)\s*\(([^)]+)\)\s*"
-    r"VALUES\s*\(([^)]+)\)\s*"
+    r"VALUES\s*\(((?:[^()]*|\((?:[^()]*|\([^()]*\))*\))*)\)\s*"
     r"ON\s+CONFLICT\s*\(((?:[^()]*|\([^()]*\))*)\)\s*DO\s+UPDATE\s+SET\s+"
     r"(.+?)(?:\s*RETURNING\s+.+)?$",
     re.IGNORECASE | re.DOTALL,
 )
+
+
+def _split_respecting_parens(s: str) -> list[str]:
+    """Split a comma-separated string while respecting parenthesised groups.
+
+    e.g. "$1, COALESCE($2, NOW()), $3" → ["$1", "COALESCE($2, NOW())", "$3"]
+    """
+    parts: list[str] = []
+    depth = 0
+    current: list[str] = []
+    for ch in s:
+        if ch == "(":
+            depth += 1
+            current.append(ch)
+        elif ch == ")":
+            depth -= 1
+            current.append(ch)
+        elif ch == "," and depth == 0:
+            parts.append("".join(current).strip())
+            current = []
+        else:
+            current.append(ch)
+    if current:
+        parts.append("".join(current).strip())
+    return parts
 
 
 def _rewrite_upsert_to_merge(query: str) -> str | None:
@@ -218,7 +246,7 @@ def _rewrite_upsert_to_merge(query: str) -> str | None:
     update_set_str = m.group(5).strip()
 
     insert_cols = [c.strip() for c in insert_cols_str.split(",")]
-    values = [v.strip() for v in values_str.split(",")]
+    values = _split_respecting_parens(values_str)
     conflict_cols = [c.strip() for c in conflict_cols_str.split(",")]
 
     # Build USING clause: SELECT :1 AS col1, :2 AS col2, ... FROM DUAL
