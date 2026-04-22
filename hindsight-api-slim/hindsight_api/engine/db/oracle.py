@@ -622,12 +622,17 @@ class OracleConnection(DatabaseConnection):
 
     @staticmethod
     def _apply_clob_input_sizes(cursor: Any, query: str, params: dict[str, Any] | None) -> None:
-        """Tell oracledb to bind JSON-shaped strings as CLOB.
+        """Tell oracledb to bind typed input sizes for ambiguous parameters.
 
         Must be called AFTER _expand_any_lists so we only register sizes for
-        params that still exist in the final query.  Oracle's thin driver
-        defaults short strings like '[]' to VARCHAR2 which fails with
-        ORA-00932 when the target column is CLOB.
+        params that still exist in the final query.  Handles two cases:
+
+        1. JSON strings: Oracle's thin driver defaults short strings like '[]'
+           to VARCHAR2 which fails with ORA-00932 when the column is CLOB.
+        2. NULL datetime params: When a None param appears in COALESCE with
+           SYSTIMESTAMP, Oracle defaults it to VARCHAR2 causing a type mismatch.
+           We detect COALESCE(:N, SYSTIMESTAMP) patterns and hint the param as
+           TIMESTAMP WITH TIME ZONE.
         """
         if not params:
             return
@@ -636,6 +641,10 @@ class OracleConnection(DatabaseConnection):
         for key, val in params.items():
             if isinstance(val, str) and val and val[0] in ("{", "[") and f":{key}" in query:
                 sizes[key] = oracledb.DB_TYPE_CLOB
+            # None params in COALESCE with SYSTIMESTAMP need explicit timestamp type
+            # to avoid ORA-00932 (VARCHAR2 NULL vs TIMESTAMP mismatch).
+            elif val is None and re.search(rf"COALESCE\s*\(:{key}\s*,\s*SYSTIMESTAMP\)", query, re.IGNORECASE):
+                sizes[key] = oracledb.DB_TYPE_TIMESTAMP_TZ
         if sizes:
             cursor.setinputsizes(**sizes)
 

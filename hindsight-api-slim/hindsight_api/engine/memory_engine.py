@@ -8094,7 +8094,7 @@ class MemoryEngine(MemoryEngineInterface):
                 db_status = row["status"]
                 api_status = "pending" if db_status in ("pending", "processing") else db_status
 
-                result_metadata = json.loads(row["result_metadata"]) if row["result_metadata"] else {}
+                result_metadata = conn.parse_json(row["result_metadata"]) or {}
 
                 operation_list.append(
                     {
