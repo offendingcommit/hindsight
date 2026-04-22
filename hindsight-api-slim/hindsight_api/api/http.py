@@ -2132,8 +2132,8 @@ class OperationResponse(BaseModel):
     created_at: str
     status: str
     error_message: str | None
-    retry_count: int = Field(
-        default=0,
+    retry_count: int | None = Field(
+        default=None,
         description="Number of times this operation has been retried after failure.",
     )
     next_retry_at: str | None = Field(
@@ -2255,8 +2255,8 @@ class OperationStatusResponse(BaseModel):
     updated_at: str | None = None
     completed_at: str | None = None
     error_message: str | None = None
-    retry_count: int = Field(
-        default=0,
+    retry_count: int | None = Field(
+        default=None,
         description="Number of times this operation has been retried after failure.",
     )
     next_retry_at: str | None = Field(
