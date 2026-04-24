@@ -74,24 +74,26 @@ class OracleOps(DataAccessOps):
         rows_data = []
         for i in range(len(fact_texts)):
             tags_value = json.loads(tags_list[i]) if tags_list[i] else []
-            rows_data.append((
-                unit_ids[i],
-                bank_id,
-                fact_texts[i],
-                embeddings[i],
-                event_dates[i],
-                occurred_starts[i],
-                occurred_ends[i],
-                mentioned_ats[i],
-                contexts[i],
-                fact_types[i],
-                metadata_jsons[i],
-                chunk_ids[i],
-                document_ids[i],
-                tags_value,
-                observation_scopes_list[i],
-                text_signals_list[i],
-            ))
+            rows_data.append(
+                (
+                    unit_ids[i],
+                    bank_id,
+                    fact_texts[i],
+                    embeddings[i],
+                    event_dates[i],
+                    occurred_starts[i],
+                    occurred_ends[i],
+                    mentioned_ats[i],
+                    contexts[i],
+                    fact_types[i],
+                    metadata_jsons[i],
+                    chunk_ids[i],
+                    document_ids[i],
+                    tags_value,
+                    observation_scopes_list[i],
+                    text_signals_list[i],
+                )
+            )
         await conn.executemany(
             f"""
             INSERT INTO {table} (id, bank_id, text, embedding, event_date, occurred_start,
