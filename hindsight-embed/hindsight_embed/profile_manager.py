@@ -535,8 +535,10 @@ class ProfileManager:
             finally:
                 unlock_file(f)
 
-        # Atomic rename
-        temp_file.rename(metadata_file)
+        # Atomic replace. `.rename()` fails on Windows when the destination
+        # exists (WinError 183); `.replace()` is the cross-platform atomic
+        # rename added in Python 3.3 exactly for this pattern.
+        temp_file.replace(metadata_file)
 
 
 def resolve_active_profile() -> str:
