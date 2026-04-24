@@ -70,7 +70,7 @@ ChatGPT Plus and Team accounts support MCP via **Connectors**, a secure way to l
 
 **Requirements:**
 - ChatGPT Plus or Team subscription
-- Optional: [Enable Developer Mode](https://platform.openai.com/account/api-keys) for beta features (not required for basic Connector use)
+- [Enable Developer Mode](https://platform.openai.com/account/api-keys) for beta features (optional; not needed for basic Connector use)
 
 **Steps:**
 
