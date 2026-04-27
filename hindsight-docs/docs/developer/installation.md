@@ -61,7 +61,7 @@ Hindsight is designed to run on commodity hardware. The footprint depends mainly
 The bulk of the full image's memory comes from the bundled embedding and reranker models and their PyTorch/ONNX runtimes. To shrink the deployment to a few hundred MB of RAM, switch to the **slim** image and configure [external embedding and reranker providers](./configuration#embeddings).
 :::
 
-CPU: 2 vCPUs is enough for development. For production, scale CPU with the rate of `retain` and `recall` calls — local embedding and reranking are CPU-bound. GPU is not required.
+CPU vs GPU: 2 vCPUs on CPU-only is fine for development and basic workloads. For production traffic, the local reranker (cross-encoder) is the main bottleneck and typically benefits from a GPU to keep recall latency reasonable; alternatively, offload reranking to an [external reranker provider](./configuration#embeddings) (e.g. TEI, Cohere) on dedicated GPU hardware.
 
 ---
 
@@ -85,12 +85,10 @@ docker run --rm -it --pull always -p 8888:8888 -p 9999:9999 \
 
 ### Docker Image Variants
 
-| Variant | Size (AMD64) | Size (ARM64) | Idle RAM | When to use |
-|---------|--------------|--------------|----------|-------------|
-| **Full** (`latest`) | ~9 GB | ~3.7 GB | ~1.2 GB | Default. Works out of the box with no external services except the LLM. Bundles local embedder and reranker models. |
-| **Slim** (`slim`) | ~500 MB | ~500 MB | ~300–500 MB | Use when you already rely on external services for embeddings and reranking (OpenAI, Cohere, TEI). Significantly smaller image, faster deploys, and lower memory. Requires [external providers](./configuration#embeddings). |
-
-Idle RAM is for the API + Control Plane container at rest; expect ~20–30% more under load. See [Hardware](#hardware) for the breakdown.
+| Variant | Size (AMD64) | Size (ARM64) | When to use |
+|---------|--------------|--------------|-------------|
+| **Full** (`latest`) | ~9 GB | ~3.7 GB | Default. Works out of the box with no external services except the LLM. |
+| **Slim** (`slim`) | ~500 MB | ~500 MB | Use when you already rely on external services for embeddings and reranking (OpenAI, Cohere, TEI). Significantly smaller image, faster deploys. Requires [external providers](./configuration#embeddings). |
 
 The slim image corresponds to the [`hindsight-api-slim`](#bare-metal-pip) pip package. See [Configuration](./configuration#embeddings) for external provider options.
 
