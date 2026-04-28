@@ -57,4 +57,9 @@ TASK.md
 # Changelog is now tracked in hindsight-docs/src/pages/changelog.md
 # CHANGELOG.md
 
-blog-post*
+blog-post*hindsight-android-sdk/app/src/main/assets/
+hindsight-android-sdk/app/src/main/jniLibs/
+hindsight-android-sdk/.gradle/
+hindsight-android-sdk/app/build/
+hindsight-android-sdk/build/
+hindsight-android-sdk/local.properties
