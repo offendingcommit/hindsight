@@ -773,10 +773,18 @@ class OracleConnection(DatabaseConnection):
                 except (json.JSONDecodeError, TypeError):
                     pass
 
-            # Auto-parse timestamp strings for columns ending in _at
-            if isinstance(val, str) and (clean_col.endswith("_at") or clean_col in ("started_at", "ended_at")):
+            # Auto-parse timestamp strings for columns ending in _at.
+            # Oracle returns timestamps as strings; ensure they are
+            # timezone-aware (UTC) to avoid naive/aware mismatches
+            # downstream (e.g. entity_resolver temporal scoring).
+            if isinstance(val, str) and (
+                clean_col.endswith("_at")
+                or clean_col in ("started_at", "ended_at", "last_seen", "event_date")
+            ):
                 try:
                     val = datetime.datetime.fromisoformat(val)
+                    if val.tzinfo is None:
+                        val = val.replace(tzinfo=datetime.timezone.utc)
                 except (ValueError, TypeError):
                     pass
 

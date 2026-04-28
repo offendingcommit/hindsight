@@ -192,11 +192,16 @@ class WorkerPoller:
         job alongside ``total_pending_tasks()``.
         """
         async with self._backend.acquire() as conn:
-            try:
-                rows = await conn.fetch("SELECT * FROM schemas_with_pending_work()")
-                return {r[0] for r in rows}
-            except Exception:
-                pass
+            # The schemas_with_pending_work() PL/pgSQL function is a
+            # PostgreSQL-specific optimisation installed by Helm hooks in
+            # hindsight-cloud. Skip on non-PG backends to avoid constant
+            # ORA-00904 / syntax errors on every poll cycle.
+            if self._backend.backend_type == "postgresql":
+                try:
+                    rows = await conn.fetch("SELECT * FROM schemas_with_pending_work()")
+                    return {r[0] for r in rows}
+                except Exception:
+                    pass
 
             # Fallback: per-schema EXISTS checks from Python
             active: set[str | None] = set()

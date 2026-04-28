@@ -1296,6 +1296,27 @@ class HindsightConfig:
                 f"provider: {self.retain_llm_provider or self.llm_provider})"
             )
 
+        # Validate local ML dependencies are available when configured
+        if self.embeddings_provider == "local" or self.reranker_provider == "local":
+            try:
+                import importlib
+
+                importlib.import_module("sentence_transformers")
+            except ImportError:
+                missing = []
+                if self.embeddings_provider == "local":
+                    missing.append("embeddings")
+                if self.reranker_provider == "local":
+                    missing.append("reranker")
+                raise ValueError(
+                    f"Local ML provider configured for {' and '.join(missing)}, "
+                    f"but 'sentence-transformers' is not installed. Either:\n"
+                    f"  1. Install local ML deps: pip install hindsight-api[local-ml]\n"
+                    f"  2. Use a remote provider instead:\n"
+                    f"     HINDSIGHT_API_EMBEDDINGS_PROVIDER=openai (or gemini, tei)\n"
+                    f"     HINDSIGHT_API_RERANKER_PROVIDER=none (or tei)"
+                )
+
         # Validate that sum of per-operation slot reservations does not exceed max_slots
         total_reserved = sum(self.worker_slot_reservations.values())
         if total_reserved > self.worker_max_slots:

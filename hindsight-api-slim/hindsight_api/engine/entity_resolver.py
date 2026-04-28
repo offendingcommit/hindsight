@@ -731,7 +731,11 @@ class EntityResolver:
 
                 # 3. Temporal proximity (0-0.2)
                 if last_seen:
-                    days_diff = abs((unit_event_date - last_seen).total_seconds() / 86400)
+                    # Normalize both to UTC-aware to avoid naive/aware mismatch
+                    # (Oracle returns naive datetimes from fromisoformat)
+                    _evt = unit_event_date if unit_event_date.tzinfo else unit_event_date.replace(tzinfo=UTC)
+                    _seen = last_seen if last_seen.tzinfo else last_seen.replace(tzinfo=UTC)
+                    days_diff = abs((_evt - _seen).total_seconds() / 86400)
                     if days_diff < 7:  # Within a week
                         temporal_score = max(0, 1.0 - (days_diff / 7))
                         score += temporal_score * 0.2

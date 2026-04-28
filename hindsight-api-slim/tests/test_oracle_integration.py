@@ -1197,8 +1197,22 @@ class TestEdgeCases:
                 bank_id=bank_id, request_context=request_context
             )
             items = memories.get("items", memories) if isinstance(memories, dict) else memories
-            # Large content should produce multiple memory units
-            assert len(items) >= 1
+            # Large content (~10KB, 50 paragraphs) should produce multiple memory units
+            # from LLM fact extraction. At minimum we expect several facts.
+            assert len(items) >= 3, (
+                f"Expected large content to produce at least 3 memory units, got {len(items)}"
+            )
+            # Verify operations completed without errors (catches background datetime issues etc.)
+            ops = await oracle_memory.list_operations(
+                bank_id=bank_id, request_context=request_context
+            )
+            if ops:
+                op_list = ops.get("items", ops) if isinstance(ops, dict) else ops
+                failed = [o for o in op_list if isinstance(o, dict) and o.get("status") == "failed"]
+                assert len(failed) == 0, (
+                    f"Expected no failed operations, got {len(failed)}: "
+                    f"{[o.get('error', o.get('status_message', ''))[:100] for o in failed]}"
+                )
         finally:
             await _safe_cleanup(oracle_memory, bank_id, request_context)
 
