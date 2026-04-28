@@ -1,10 +1,10 @@
 ---
 title: "Pipecat Voice AI Persistent Memory: Add Memory to Your Voice Pipeline"
 authors: [benfrank241]
-date: 2026-04-24T12:00
+date: 2026-04-24
 tags: [memory, voice, ai, pipecat, python, agent, real-time, streaming, context, knowledge-graph]
+description: "Add persistent long-term memory to Pipecat voice AI pipelines. Recall relevant past conversations and retain new exchanges with a single FrameProcessor between your user aggregator and LLM service."
 image: /img/blog/pipecat-voice-ai-persistent-memory.png
-hide_table_of_contents: true
 ---
 
 If you build voice AI pipelines with [Pipecat](https://github.com/pipecat-ai/pipecat), you know it handles real-time speech processing, LLM integration, and streaming synthesis beautifully. But there's one critical thing it doesn't do: remember anything between calls. Every voice conversation starts fresh. Your voice agent has no idea what the user said in yesterday's call, what their preferences are, or what it already researched.
