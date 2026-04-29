@@ -331,7 +331,9 @@ async function ensureNemoClawPlugin(sandboxName: string, agentId: string): Promi
   try {
     execSync("which nemoclaw", { stdio: "pipe" });
   } catch {
-    p.cancel("nemoclaw not found. Install it: curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash");
+    p.cancel(
+      "nemoclaw not found. Install it: curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash"
+    );
     process.exit(1);
   }
 
@@ -339,9 +341,7 @@ async function ensureNemoClawPlugin(sandboxName: string, agentId: string): Promi
   try {
     execSync(`nemoclaw ${sandboxName} status`, { stdio: "pipe" });
   } catch {
-    p.cancel(
-      `Sandbox '${sandboxName}' not found. Create one with: nemoclaw onboard`
-    );
+    p.cancel(`Sandbox '${sandboxName}' not found. Create one with: nemoclaw onboard`);
     process.exit(1);
   }
 
@@ -515,12 +515,14 @@ async function main() {
       mkdirSync(tmpSkill, { recursive: true });
       writeFileSync(join(tmpSkill, "SKILL.md"), SKILL_MD);
       try {
-        execSync(`nemoclaw ${sandbox} skill install ${tmpSkillDir}`, { stdio: "inherit" });
+        execSync(`nemoclaw ${sandbox} skill install ${tmpSkill}`, { stdio: "inherit" });
         p.log.success("Knowledge skill installed in sandbox");
       } catch (err: any) {
         const stderr = err?.stderr?.toString?.()?.trim() || "";
         const msg = stderr || err?.message || String(err);
-        p.log.warn(`Failed to install skill: ${msg}\n  Install manually:\n  nemoclaw ${sandbox} skill install <skill-dir>`);
+        p.log.warn(
+          `Failed to install skill: ${msg}\n  Install manually:\n  nemoclaw ${sandbox} skill install <skill-dir>`
+        );
       } finally {
         rmSync(tmpSkillDir, { recursive: true, force: true });
       }
@@ -540,10 +542,10 @@ async function main() {
         });
         const agents = parseAgentsJson(listOut);
         if (!agents.some((a: any) => a.name === agentId || a.id === agentId)) {
-          execSync(
-            `openclaw agents add ${agentId} --workspace ${workspaceDir} --non-interactive`,
-            { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }
-          );
+          execSync(`openclaw agents add ${agentId} --workspace ${workspaceDir} --non-interactive`, {
+            encoding: "utf-8",
+            stdio: ["pipe", "pipe", "pipe"],
+          });
           p.log.success(`Agent '${agentId}' created`);
         } else {
           p.log.info(`Agent '${agentId}' already exists`);
