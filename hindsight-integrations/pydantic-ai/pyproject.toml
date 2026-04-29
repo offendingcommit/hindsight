@@ -1,6 +1,6 @@
 [project]
 name = "hindsight-pydantic-ai"
-version = "0.4.20"
+version = "0.5.0"
 description = "Pydantic AI integration for Hindsight - persistent memory tools for AI agents"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,6 +32,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+logfire = [
+    "logfire>=2.0",
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-mock>=3.10.0",

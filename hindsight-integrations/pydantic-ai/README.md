@@ -131,6 +131,30 @@ instructions_fn = memory_instructions(
 )
 ```
 
+## Observability with Pydantic Logfire
+
+Every retain / recall / reflect call automatically emits a [Logfire](https://logfire.pydantic.dev) span when Logfire is installed and configured — no code changes to your agent. You see semantic spans like `hindsight.recall { bank_id, query, results_count }` nested under each Pydantic AI agent run.
+
+```bash
+pip install "hindsight-pydantic-ai[logfire]"
+```
+
+```python
+import logfire
+from pydantic_ai import Agent
+from hindsight_pydantic_ai import create_hindsight_tools
+
+logfire.configure()                # one line, anywhere at app startup
+logfire.instrument_pydantic_ai()   # nests Hindsight spans under agent.run
+
+agent = Agent(
+    "openai:gpt-4o",
+    tools=create_hindsight_tools(bank_id="user-123", hindsight_api_url="..."),
+)
+```
+
+Spans never carry raw memory content — only `bank_id`, the query (truncated to 200 chars), tags, and result counts. Without `logfire` installed the integration runs identically with zero overhead; the spans turn into no-ops.
+
 ## Configuration Reference
 
 ### `create_hindsight_tools()`

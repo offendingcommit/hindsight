@@ -14,6 +14,7 @@ from typing import Any
 from hindsight_client import Hindsight
 from pydantic_ai import RunContext, Tool
 
+from ._observability import span, truncate
 from .config import get_config
 from .errors import HindsightError
 
@@ -111,15 +112,21 @@ def create_hindsight_tools(
             Use this to save important facts, user preferences, decisions,
             or any information that should be remembered across conversations.
             """
-            try:
-                retain_kwargs: dict[str, Any] = {"bank_id": bank_id, "content": content}
-                if effective_tags:
-                    retain_kwargs["tags"] = effective_tags
-                await resolved_client.aretain(**retain_kwargs)
-                return "Memory stored successfully."
-            except Exception as e:
-                logger.error(f"Retain failed: {e}")
-                raise HindsightError(f"Retain failed: {e}") from e
+            async with span(
+                "hindsight.retain",
+                bank_id=bank_id,
+                tags=effective_tags,
+                content_length=len(content),
+            ):
+                try:
+                    retain_kwargs: dict[str, Any] = {"bank_id": bank_id, "content": content}
+                    if effective_tags:
+                        retain_kwargs["tags"] = effective_tags
+                    await resolved_client.aretain(**retain_kwargs)
+                    return "Memory stored successfully."
+                except Exception as e:
+                    logger.error(f"Retain failed: {e}")
+                    raise HindsightError(f"Retain failed: {e}") from e
 
         tools.append(Tool(hindsight_retain, takes_ctx=False))
 
@@ -131,26 +138,36 @@ def create_hindsight_tools(
             Use this to find previously stored facts, preferences, or context.
             Returns a numbered list of matching memories.
             """
-            try:
-                recall_kwargs: dict[str, Any] = {
-                    "bank_id": bank_id,
-                    "query": query,
-                    "budget": effective_budget,
-                    "max_tokens": effective_max_tokens,
-                }
-                if effective_recall_tags:
-                    recall_kwargs["tags"] = effective_recall_tags
-                    recall_kwargs["tags_match"] = effective_recall_tags_match
-                response = await resolved_client.arecall(**recall_kwargs)
-                if not response.results:
-                    return "No relevant memories found."
-                lines = []
-                for i, result in enumerate(response.results, 1):
-                    lines.append(f"{i}. {result.text}")
-                return "\n".join(lines)
-            except Exception as e:
-                logger.error(f"Recall failed: {e}")
-                raise HindsightError(f"Recall failed: {e}") from e
+            async with span(
+                "hindsight.recall",
+                bank_id=bank_id,
+                query=truncate(query),
+                budget=effective_budget,
+                max_tokens=effective_max_tokens,
+                tags=effective_recall_tags,
+            ) as s:
+                try:
+                    recall_kwargs: dict[str, Any] = {
+                        "bank_id": bank_id,
+                        "query": query,
+                        "budget": effective_budget,
+                        "max_tokens": effective_max_tokens,
+                    }
+                    if effective_recall_tags:
+                        recall_kwargs["tags"] = effective_recall_tags
+                        recall_kwargs["tags_match"] = effective_recall_tags_match
+                    response = await resolved_client.arecall(**recall_kwargs)
+                    if s is not None:
+                        s.set_attribute("results_count", len(response.results))
+                    if not response.results:
+                        return "No relevant memories found."
+                    lines = []
+                    for i, result in enumerate(response.results, 1):
+                        lines.append(f"{i}. {result.text}")
+                    return "\n".join(lines)
+                except Exception as e:
+                    logger.error(f"Recall failed: {e}")
+                    raise HindsightError(f"Recall failed: {e}") from e
 
         tools.append(Tool(hindsight_recall, takes_ctx=False))
 
@@ -162,17 +179,26 @@ def create_hindsight_tools(
             Use this when you need a coherent summary or reasoned response
             about what you know, rather than raw memory facts.
             """
-            try:
-                reflect_kwargs: dict[str, Any] = {
-                    "bank_id": bank_id,
-                    "query": query,
-                    "budget": effective_budget,
-                }
-                response = await resolved_client.areflect(**reflect_kwargs)
-                return response.text or "No relevant memories found."
-            except Exception as e:
-                logger.error(f"Reflect failed: {e}")
-                raise HindsightError(f"Reflect failed: {e}") from e
+            async with span(
+                "hindsight.reflect",
+                bank_id=bank_id,
+                query=truncate(query),
+                budget=effective_budget,
+            ) as s:
+                try:
+                    reflect_kwargs: dict[str, Any] = {
+                        "bank_id": bank_id,
+                        "query": query,
+                        "budget": effective_budget,
+                    }
+                    response = await resolved_client.areflect(**reflect_kwargs)
+                    text = response.text or "No relevant memories found."
+                    if s is not None:
+                        s.set_attribute("response_length", len(text))
+                    return text
+                except Exception as e:
+                    logger.error(f"Reflect failed: {e}")
+                    raise HindsightError(f"Reflect failed: {e}") from e
 
         tools.append(Tool(hindsight_reflect, takes_ctx=False))
 
@@ -222,26 +248,37 @@ def memory_instructions(
     resolved_client = _resolve_client(client, hindsight_api_url, api_key)
 
     async def _instructions(ctx: RunContext[Any]) -> str:
-        try:
-            recall_kwargs: dict[str, Any] = {
-                "bank_id": bank_id,
-                "query": query,
-                "budget": budget,
-                "max_tokens": max_tokens,
-            }
-            if tags:
-                recall_kwargs["tags"] = tags
-                recall_kwargs["tags_match"] = tags_match
-            response = await resolved_client.arecall(**recall_kwargs)
-            results = response.results[:max_results] if response.results else []
-            if not results:
+        async with span(
+            "hindsight.recall.instructions",
+            bank_id=bank_id,
+            query=truncate(query),
+            budget=budget,
+            max_tokens=max_tokens,
+            max_results=max_results,
+            tags=tags,
+        ) as s:
+            try:
+                recall_kwargs: dict[str, Any] = {
+                    "bank_id": bank_id,
+                    "query": query,
+                    "budget": budget,
+                    "max_tokens": max_tokens,
+                }
+                if tags:
+                    recall_kwargs["tags"] = tags
+                    recall_kwargs["tags_match"] = tags_match
+                response = await resolved_client.arecall(**recall_kwargs)
+                results = response.results[:max_results] if response.results else []
+                if s is not None:
+                    s.set_attribute("results_count", len(results))
+                if not results:
+                    return ""
+                lines = [prefix]
+                for i, result in enumerate(results, 1):
+                    lines.append(f"{i}. {result.text}")
+                return "\n".join(lines)
+            except Exception:
+                # Silently return empty — instructions failures shouldn't block the agent
                 return ""
-            lines = [prefix]
-            for i, result in enumerate(results, 1):
-                lines.append(f"{i}. {result.text}")
-            return "\n".join(lines)
-        except Exception:
-            # Silently return empty — instructions failures shouldn't block the agent
-            return ""
 
     return _instructions
