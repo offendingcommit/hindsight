@@ -2,6 +2,7 @@ import type {
   MoltbotPluginAPI,
   PluginConfig,
   PluginHookAgentContext,
+  PluginToolContext,
   MemoryResult,
   RetainRequest,
 } from "./types.js";
@@ -17,7 +18,7 @@ import { configureLogger, setApiLogger, stopLogger } from "./logger.js";
 import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync } from "fs";
 import { extname } from "path";
 import { homedir } from "os";
-import { createKnowledgeToolFactory } from "./knowledge-tools.js";
+import { createKnowledgeTools, TOOL_NAMES } from "@vectorize-io/hindsight-agent-sdk";
 
 function loadPackageVersion(): string {
   try {
@@ -2360,24 +2361,29 @@ ${memoriesFormatted}
     // Register knowledge tools (opt-in via enableKnowledgeTools config flag)
     if (pluginConfig.enableKnowledgeTools && typeof api.registerTool === "function") {
       try {
-        const factory = createKnowledgeToolFactory({
-          pluginConfig,
-          getApiUrl: () => {
-            const ext = detectExternalApi(pluginConfig);
-            return ext?.apiUrl || `http://localhost:${pluginConfig.apiPort || 9077}`;
-          },
-          getApiToken: () => pluginConfig.hindsightApiToken || undefined,
-        });
+        const apiUrl = (() => {
+          const ext = detectExternalApi(pluginConfig);
+          return ext?.apiUrl || `http://localhost:${pluginConfig.apiPort || 9077}`;
+        })();
+        const apiToken = pluginConfig.hindsightApiToken || undefined;
+
+        // Factory: called per session with agent context, returns tools scoped to that bank
+        const factory = (ctx: PluginToolContext) => {
+          const bankId = deriveBankId(ctx as any, pluginConfig);
+          const tools = createKnowledgeTools({ apiUrl, apiToken, bankId });
+          return tools.map((t) => ({
+            name: t.name,
+            label: t.label,
+            description: t.description,
+            parameters: t.parameters,
+            async execute(_id: string, params: Record<string, unknown>) {
+              return { ...await t.execute(params), details: {} };
+            },
+          }));
+        };
+
         api.registerTool(factory, {
-          names: [
-            "agent_knowledge_list_pages",
-            "agent_knowledge_get_page",
-            "agent_knowledge_create_page",
-            "agent_knowledge_update_page",
-            "agent_knowledge_delete_page",
-            "agent_knowledge_recall",
-            "agent_knowledge_ingest",
-          ],
+          names: [...TOOL_NAMES],
           optional: false,
         });
         log.info("knowledge tools registered");
