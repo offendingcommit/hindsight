@@ -266,10 +266,15 @@ async def retrieve_semantic_bm25_combined(
                 fb_next_idx += 1
             fb_arms = [
                 dialect.build_semantic_arm(
-                    table=table, cols=cols, fact_type=ft,
-                    embedding_param="$1", bank_id_param="$2",
-                    fetch_limit=hnsw_fetch, tags_clause=fb_tags_clause,
-                    groups_clause=fb_groups_clause, extra_where=fb_created_clause,
+                    table=table,
+                    cols=cols,
+                    fact_type=ft,
+                    embedding_param="$1",
+                    bank_id_param="$2",
+                    fetch_limit=hnsw_fetch,
+                    tags_clause=fb_tags_clause,
+                    groups_clause=fb_groups_clause,
+                    extra_where=fb_created_clause,
                 )
                 for ft in fact_types
             ]
