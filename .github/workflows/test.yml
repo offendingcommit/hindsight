@@ -1646,9 +1646,12 @@ jobs:
           sleep 1
         done
 
-    - name: Run Python client tests
+    - name: Run Python client tests (Oracle, sequential)
       working-directory: ./hindsight-clients/python
-      run: uv run pytest tests -v
+      # -n0 overrides the "-n auto" default in pyproject.toml. Oracle's
+      # row-level locking deadlocks (ORA-00060) under concurrent retain
+      # cleanup — same reason test-api-oracle runs sequentially.
+      run: uv run pytest tests -v -n0
 
     - name: Show API server logs
       if: always()
