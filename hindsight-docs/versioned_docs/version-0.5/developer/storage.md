@@ -40,7 +40,7 @@ By building on PostgreSQL, we keep the system simple:
 
 ### Oracle Database Support
 
-For enterprise deployments, Hindsight also supports Oracle Database with full feature parity. All memory operations—retain, recall, and reflect—work identically on Oracle, making it a drop-in option for organizations that standardize on Oracle infrastructure.
+For enterprise deployments, Hindsight also supports Oracle AI Database 26ai with full feature parity. All memory operations—retain, recall, and reflect—work identically on Oracle, making it a drop-in option for organizations that standardize on Oracle infrastructure.
 
 ## Development with pg0
 
