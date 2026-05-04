@@ -49,6 +49,7 @@ jobs:
       integrations-agentcore: ${{ steps.filter.outputs.integrations-agentcore }}
       integrations-smolagents: ${{ steps.filter.outputs.integrations-smolagents }}
       integrations-dify: ${{ steps.filter.outputs.integrations-dify }}
+      integrations-flowise: ${{ steps.filter.outputs.integrations-flowise }}
       tools-agent-sdk: ${{ steps.filter.outputs.tools-agent-sdk }}
       dev: ${{ steps.filter.outputs.dev }}
       ci: ${{ steps.filter.outputs.ci }}
@@ -143,6 +144,8 @@ jobs:
             - 'hindsight-integrations/smolagents/**'
           integrations-dify:
             - 'hindsight-integrations/dify/**'
+          integrations-flowise:
+            - 'hindsight-integrations/flowise/**'
           tools-agent-sdk:
             - 'hindsight-tools/hindsight-agent-sdk/**'
           dev:
@@ -2595,6 +2598,37 @@ jobs:
       working-directory: ./hindsight-integrations/dify
       run: pytest tests -v
 
+  test-flowise-integration:
+    needs: [detect-changes]
+    if: >-
+      github.event_name != 'pull_request_review' &&
+      (github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.integrations-flowise == 'true' ||
+      needs.detect-changes.outputs.ci == 'true')
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version: '22'
+
+    - name: Install dependencies
+      working-directory: ./hindsight-integrations/flowise
+      run: npm install --no-audit --no-fund
+
+    - name: Type check
+      working-directory: ./hindsight-integrations/flowise
+      run: npx tsc --noEmit
+
+    - name: Run tests
+      working-directory: ./hindsight-integrations/flowise
+      run: npm test
+
   test-crewai-integration:
     needs: [detect-changes]
     if: >-
@@ -3648,6 +3682,7 @@ jobs:
       - test-ag2-integration
       - test-smolagents-integration
       - test-dify-integration
+      - test-flowise-integration
       - test-crewai-integration
       - test-litellm-integration
       - test-pydantic-ai-integration
