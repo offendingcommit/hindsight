@@ -134,6 +134,8 @@ The shift is uneven. Some harnesses have started building memory directly. Other
 
 Hermes ships a native memory plugin. The pattern is the cleanest example of memory-as-harness-feature — the plugin handles retention and recall as part of the agent loop, not as an external concern. A `hermes memory setup` wizard in a recent release makes the integration nearly one-step.
 
+Hermes also takes the idea a step further than most harnesses: it can **create its own skills**. When the agent encounters a workflow it expects to repeat, it can write a new skill — a reusable, callable capability — and add it to its own toolbox for future sessions. That is a real harness-level differentiator, and it is closer to memory than it first appears: a skill is procedural memory, the kind that captures *how* to do something rather than *what* happened. Pair it with declarative memory (facts, decisions, preferences from a memory layer like Hindsight) and you have both halves of how a working agent should remember. It is also one of the clearest precursors to self-driving agents — a harness that can extend its own capabilities is a harness that can iterate without you.
+
 ### OpenClaw
 
 OpenClaw treats memory as a first-class plugin too. A typical config looks like this:
