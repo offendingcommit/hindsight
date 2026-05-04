@@ -1,5 +1,5 @@
 ---
-title: "Your Agent Harness Has Tools. It Still Needs Memory."
+title: "The Missing Layer in Every Agent Harness"
 description: "Modern agent harnesses ship with tools, MCP, and IDE integrations — but no memory. Why that's the missing layer, and how harnesses are starting to fix it."
 authors: [benfrank241]
 date: 2026-05-04
@@ -7,7 +7,7 @@ tags: [memory, agents, hindsight, harness, claude-code, openclaw, hermes]
 image: /img/blog/agent-harness-needs-memory.png
 ---
 
-![Your Agent Harness Has Tools. It Still Needs Memory.](/img/blog/agent-harness-needs-memory.png)
+![The Missing Layer in Every Agent Harness](/img/blog/agent-harness-needs-memory.png)
 
 Pick any modern agent harness — [Claude Code](https://docs.claude.com/en/docs/claude-code), [Cursor](https://cursor.com), OpenClaw, Hermes, [Codex](https://github.com/openai/codex), [Aider](https://aider.chat), Cline, Roo Code, [Pipecat](https://github.com/pipecat-ai/pipecat). They have all gotten dramatically better in the last 18 months. They have file access. They have shell access. They have [MCP](https://modelcontextprotocol.io) servers. They have browser control. They have rich IDE integrations and slash commands and skills and subagents.
 
