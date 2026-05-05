@@ -94,17 +94,17 @@ The orchestrator knows things from the conversation. The subagent it just spawne
 
 ## What Changes With Shared Memory
 
-A shared memory layer — one bank, accessible to the orchestrator and every subagent it spawns — flips the model.
+A shared memory layer — one bank that the orchestrator reads from and writes to as the session runs — flips the model.
 
 Now the picture looks like this:
 
-- The orchestrator and all subagents read from the same memory before they start their work
-- They write back what they learn — facts, decisions, preferences, patterns, dead ends
-- The next subagent (or the next session entirely) inherits everything that was retained
+- The orchestrator pulls relevant memories before each turn and brings that context into the prompts it sends subagents
+- The full session transcript — orchestrator turns plus every subagent's tool results — gets retained back to the same bank when the turn ends
+- The next subagent (in this session or the next one) inherits everything that was previously retained, surfaced through the orchestrator
 
-The first `Explore` agent's findings are available to the second one. The custom `code-reviewer` subagent inherits the preferences your team accumulated over previous reviews. Parallel subagents stop colliding because each one starts from "here is the current shared understanding of the project," not "here is the prompt and the codebase, figure it out."
+The first `Explore` agent's findings are available to the second one — because they were captured in the prior session's transcript and surface again on the next relevant prompt. The custom `code-reviewer` subagent inherits the preferences your team accumulated over previous reviews — because the orchestrator recalls them and includes them in the review brief. Parallel subagents stop colliding because they're delegated from an orchestrator that already knows what the project has settled on.
 
-The orchestrator stops spending tokens re-explaining context to subagents — the subagent just recalls it from the bank.
+The orchestrator stops spending tokens re-explaining the same context every session. It pulls it from the bank.
 
 This is not a small ergonomic win. It is the difference between subagents being a delegation primitive and subagents being a *team*.
 
@@ -116,22 +116,29 @@ The integration is intentionally low-effort. The [hindsight-memory plugin](https
 
 - `SessionStart` — health check on the memory bank
 - `UserPromptSubmit` — auto-recall relevant memories before the model is called
-- `Stop` — auto-retain anything worth keeping when the turn ends
+- `Stop` — auto-retain the session transcript when the turn ends
+- `SessionEnd` — cleanup
 
-Subagents inherit the same hooks. So when a subagent starts, it pulls relevant context from the same shared bank. When it stops, what it learned gets retained back to the same bank. No separate setup per subagent. No special wiring.
+The hooks fire at the **session level**, not inside subagent loops. That sounds like a limitation but is actually what makes the design clean for shared memory:
 
-A typical project setup:
+- **Recall** happens once on the orchestrator's turn — the orchestrator picks up relevant context *before* it decides to delegate. Whatever it knows from memory is then carried into the subagent prompt it constructs via the `Task` tool. The subagent inherits context indirectly, through the orchestrator, without needing its own hooks.
+- **Retain** runs at the orchestrator's `Stop`, after subagents have finished and returned. It reads the full session JSONL transcript, which captures every subagent's tool results and final messages. So everything a subagent did or discovered ends up in the bank — no per-subagent wiring needed.
 
-```yaml
-# .claude/hindsight.yaml
-bank: my-project
-autoRecall: true
-autoRetain: true
+The net effect is what you want: subagents benefit from accumulated learning (orchestrator-mediated on the way in, full-transcript-captured on the way out) and you only configure one set of hooks.
+
+A typical project setup lives at `~/.hindsight/claude-code.json`:
+
+```json
+{
+  "bankId": "my-project",
+  "autoRecall": true,
+  "autoRetain": true
+}
 ```
 
-The `bank` is the shared identity — every subagent that runs in this project writes to and reads from `my-project`. If you want each user to have their own slice while still sharing project knowledge, the [memory bank reference](https://hindsight.vectorize.io/developer/api/memory-banks) covers per-user scoping patterns.
+The `bankId` is the shared identity — every session in this project, and every subagent it spawns, writes to and reads from `my-project`. If you want per-project, per-user, or per-channel isolation, set `dynamicBankId: true` and configure `dynamicBankGranularity` (e.g. `["agent", "project"]` or `["user"]`). The [memory bank reference](https://hindsight.vectorize.io/developer/api/memory-banks) covers the patterns; the same set of hooks supports all of them.
 
-That is the entire setup. After a few sessions of normal work, you can run a subagent and watch it recall preferences and decisions it never personally encountered.
+That is the entire setup. After a few sessions of normal work, you can run a subagent against this bank and watch the orchestrator surface preferences and decisions a previous subagent figured out, in a previous session.
 
 ---
 
