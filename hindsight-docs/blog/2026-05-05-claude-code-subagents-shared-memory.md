@@ -11,9 +11,9 @@ image: /img/blog/claude-code-subagents-memory.png
 
 [Claude Code's subagent system](https://docs.claude.com/en/docs/claude-code/sub-agents) is one of the best things to ship in the harness layer this year. You can delegate work to specialized agents — `Plan` to think through a strategy, `Explore` to crawl the codebase, `general-purpose` to handle a multi-step task, or any custom subagent you define under `.claude/agents/`. Each one runs in its own context, with its own system prompt and tools, and reports back when it's done.
 
-It's a clean delegation model. It is also completely amnesiac.
+It's a clean delegation model. By default, it's also amnesiac in a specific way: every subagent invocation starts fresh, and even when you opt into the persistence features Claude Code does ship, knowledge stays siloed inside each subagent.
 
-Every subagent invocation starts from zero. Whatever the subagent figures out — the file it found, the architectural pattern it noticed, the dead end it hit, the decision the user made mid-task — vanishes the moment it returns. The orchestrator gets back a final message. Everything else evaporates.
+Whatever the subagent figures out — the file it found, the architectural pattern it noticed, the dead end it hit, the decision the user made mid-task — vanishes the moment it returns. The orchestrator gets back a final message. Everything else evaporates.
 
 If you have ever launched the same `Explore` agent twice in a row to find a thing it already found, you have hit this. If you have ever watched two parallel subagents independently discover the same constraint, you have hit this. If you have ever wondered why your custom code-review subagent never seems to learn what your team actually cares about, you have hit this.
 
@@ -21,12 +21,12 @@ If you have ever launched the same `Explore` agent twice in a row to find a thin
 
 ## TL;DR
 
-- Claude Code subagents (Plan, Explore, general-purpose, and custom subagents under `.claude/agents/`) are powerful but stateless
-- Each subagent spawn starts fresh — no memory of prior runs, no awareness of what sibling subagents have already discovered
-- Only the final message returns to the orchestrator; intermediate exploration, decisions, and learnings disappear
-- A shared memory layer (Hindsight on a single project bank) lets every subagent and the orchestrator read and write to the same memory
-- What one subagent discovers, every subsequent subagent can recall — no more re-exploring, no more re-deciding
-- [Hindsight](https://github.com/vectorize-io/hindsight) is the memory layer; the [hindsight-memory plugin](https://hindsight.vectorize.io/integrations) wires it into Claude Code's hook system automatically
+- Claude Code subagents (Plan, Explore, general-purpose, and custom subagents under `.claude/agents/`) start fresh on every invocation by default
+- Claude Code does ship two partial answers — the `memory` field (per-subagent persistent directory) and experimental subagent resume via `SendMessage` — but neither solves the *cross-subagent* sharing problem
+- Each subagent's `memory` directory is siloed from every other subagent's. The code-reviewer doesn't see what the security-auditor learned, and vice versa.
+- A shared memory layer (Hindsight on a single project bank) gives every subagent — plus the orchestrator — one common, accumulating understanding
+- The pattern mirrors filesystem-vs-memory: per-subagent `MEMORY.md` files are a hard drive; a shared learning bank is closer to a memory
+- [Hindsight](https://github.com/vectorize-io/hindsight) is the memory layer; the [hindsight-memory plugin](https://hindsight.vectorize.io/integrations) wires it into Claude Code's session hooks automatically
 
 ---
 
@@ -64,6 +64,22 @@ For a single one-shot task, none of that matters — the final message captures 
 
 ---
 
+## What Claude Code Already Does (And Where It Stops)
+
+Claude Code is not unaware of this. It ships two mechanisms that partially address subagent persistence — both worth knowing about, neither sufficient for cross-subagent shared understanding.
+
+**The `memory` field.** A subagent's YAML frontmatter can include `memory: project` (or `user`, or `local`). When set, Claude Code gives that subagent a persistent directory — `~/.claude/agent-memory/<name>/` for `user` scope, `.claude/agent-memory/<name>/` for `project` — and auto-injects the first 200 lines of `MEMORY.md` from that directory into the system prompt on each invocation. The subagent gets Read/Write/Edit tools enabled so it can curate its own notes over time.
+
+This is real persistence and a real win for tasks where the same subagent does the same kind of work repeatedly. The catch: every subagent has its **own** memory directory. Your `code-reviewer` subagent's `MEMORY.md` is invisible to your `security-auditor` subagent, and vice versa. Knowledge accumulates per-subagent, not across them. It is also a markdown file — the same filesystem-as-memory pattern we critiqued for `CLAUDE.md`. There's no synthesis, no relevance ranking, no mental model. Just files the subagent reads on startup and edits when prompted.
+
+**Subagent resume via `SendMessage`.** Experimental, gated behind `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`. When enabled, Claude can resume a specific subagent by ID and the subagent picks up its full conversation history — every prior tool call, result, and reasoning step. Subagent transcripts persist independently of main-conversation compaction and survive across Claude Code restarts (by resuming the parent session).
+
+This is the right answer when you want to continue *one* subagent's in-progress work. It does not address the case where many subagents — different kinds, across different sessions — should share one accumulating understanding of your project.
+
+So Claude Code's native answers solve "this subagent should remember its own past." They don't solve "all my subagents should share a common, growing understanding of what we've learned together."
+
+---
+
 ## Where The Pain Shows Up
 
 This is not theoretical. The patterns repeat:
@@ -94,7 +110,7 @@ The orchestrator knows things from the conversation. The subagent it just spawne
 
 ## What Changes With Shared Memory
 
-A shared memory layer — one bank that the orchestrator reads from and writes to as the session runs — flips the model.
+A shared memory layer — one bank that the orchestrator reads from and writes to as the session runs — flips the model. Instead of N siloed `MEMORY.md` files, one per subagent, you get a single learning layer everything draws from.
 
 Now the picture looks like this:
 
@@ -199,21 +215,23 @@ Shared memory is not always the right choice. A few honest tradeoffs:
 - **Sensitive context.** If a subagent is reading customer data, think carefully about what gets retained. The plugin's retention is configurable; you can keep specific data out of the bank.
 - **Single-shot work.** If you almost never use subagents and your sessions are isolated, the value is lower. Memory pays off when work is iterative.
 - **The first few days.** A new bank is empty. The compounding effect kicks in once a few sessions have built it up — usually within a week of normal use.
+- **You may not need shared memory.** If you only use one type of subagent and it works alone, Claude Code's native `memory` field may be enough on its own — a per-subagent `MEMORY.md` it curates over time. Hindsight is the right answer when you have multiple subagents that should share understanding, when you want learning memory rather than file-based notes, or when the same knowledge needs to surface across both the orchestrator and its subagents.
 
-These are not deal-breakers, just things to size for. For most Claude Code users running subagents regularly, the right answer is one project bank with auto-retain and auto-recall on.
+These are not deal-breakers, just things to size for. For most Claude Code users running multiple subagents regularly, the right answer is one project bank with auto-retain and auto-recall on.
 
 ---
 
 ## Recap
 
-- Claude Code subagents are powerful but stateless — every spawn starts fresh
-- Only the final message returns; everything the subagent learned in the loop disappears
-- Without shared memory, sibling subagents collide and sequential subagents re-derive what their predecessors found
-- One shared bank — Hindsight on the project — gives every subagent and the orchestrator a common, growing understanding
-- The hindsight-memory plugin uses Claude Code's hook system, so subagents inherit memory access with no per-subagent wiring
+- Claude Code subagents start fresh on every invocation by default; only the final message returns to the orchestrator
+- Claude Code's native `memory` field gives a subagent its own persistent `MEMORY.md` — useful, but each subagent's directory is siloed from every other subagent's
+- `SendMessage` resume (experimental) lets you continue *one* subagent's work, but doesn't address the shared-knowledge case
+- Without a shared layer, sibling subagents collide and sequential subagents re-derive what their predecessors found
+- One shared Hindsight bank gives every subagent and the orchestrator a common, growing understanding — instead of N siloed `MEMORY.md` files
+- The hindsight-memory plugin uses Claude Code's session hooks, so subagents inherit access to the shared bank with no per-subagent wiring
 - Self-improving behavior — including agents that update their own `CLAUDE.md` — is the next layer; shared memory is the foundation it sits on
 
-Subagents are how Claude Code scales beyond one context window. Shared memory is how subagents stop being strangers to each other.
+Subagents are how Claude Code scales beyond one context window. A shared memory bank is how those subagents stop being strangers to each other.
 
 ---
 
