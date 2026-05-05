@@ -790,7 +790,8 @@ async function ensureClaudeCodePlugin(
 
   // If plugin config already exists, use it as-is — don't overwrite
   if (existingConfig && (existingConfig.hindsightApiUrl || existingConfig.llmProvider)) {
-    const apiUrl = existingConfig.hindsightApiUrl || `http://localhost:${existingConfig.apiPort || 9077}`;
+    const apiUrl =
+      existingConfig.hindsightApiUrl || `http://localhost:${existingConfig.apiPort || 9077}`;
     const apiToken = existingConfig.hindsightApiToken || undefined;
     // Bank ID comes from plugin's derivation logic at runtime — use agentId as default for ingestion
     const bankId = agentId;
@@ -1118,6 +1119,21 @@ When you learn something durable — a user preference, a working procedure, per
 `
       );
       p.log.success(`Subagent installed at ${color.dim(agentFile)}`);
+
+      // Ensure MCP tools are auto-approved in user settings
+      const userSettingsPath = join(homedir(), ".claude", "settings.json");
+      let userSettings: Record<string, any> = {};
+      if (existsSync(userSettingsPath)) {
+        try { userSettings = JSON.parse(readFileSync(userSettingsPath, "utf-8")); } catch { /* ignore */ }
+      }
+      const allowedTools: string[] = userSettings.allowedTools || [];
+      const mcpPattern = "mcp__hindsight__*";
+      if (!allowedTools.includes(mcpPattern)) {
+        allowedTools.push(mcpPattern);
+        userSettings.allowedTools = allowedTools;
+        writeFileSync(userSettingsPath, JSON.stringify(userSettings, null, 2) + "\n");
+        p.log.success("Auto-approved hindsight MCP tools in Claude Code permissions");
+      }
     } else if (harness === "hermes") {
       // Skill + plugin already installed by ensureHermesPlugin
     } else if (harness === "nemoclaw") {
