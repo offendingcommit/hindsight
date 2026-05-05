@@ -742,7 +742,6 @@ async function promptClaudeConfig(
   return { apiUrl, bankId, apiToken };
 }
 
-
 // ── Main ────────────────────────────────────────────────
 
 async function main() {
@@ -920,6 +919,32 @@ async function main() {
         writeFileSync(destPath, readFileSync(join(dir, relPath), "utf-8"));
       }
       p.log.success(`Content saved to ${color.dim(contentDir)} (${contentFiles.length} files)`);
+
+      // Auto-approve hindsight MCP tools and skills in user settings
+      const userSettingsPath = join(homedir(), ".claude", "settings.json");
+      let userSettings: Record<string, any> = {};
+      if (existsSync(userSettingsPath)) {
+        try { userSettings = JSON.parse(readFileSync(userSettingsPath, "utf-8")); } catch { /* ignore */ }
+      }
+      const allowedTools: string[] = userSettings.allowedTools || [];
+      const toolsToAllow = [
+        "mcp__hindsight__*",
+        "Skill(hindsight-memory:create-agent)",
+        `Bash(ls ~/.self-driving-agents/*)`,
+        `Bash(cat ~/.self-driving-agents/*)`,
+      ];
+      let updated = false;
+      for (const tool of toolsToAllow) {
+        if (!allowedTools.includes(tool)) {
+          allowedTools.push(tool);
+          updated = true;
+        }
+      }
+      if (updated) {
+        userSettings.allowedTools = allowedTools;
+        writeFileSync(userSettingsPath, JSON.stringify(userSettings, null, 2) + "\n");
+        p.log.success("Auto-approved hindsight tools in Claude Code");
+      }
 
       const prompt = `Use /hindsight-memory:create-agent to create a "${agentId}" agent. Then ingest all files from ${contentDir}/ and create 3 knowledge pages that make sense based on the content.`;
 
