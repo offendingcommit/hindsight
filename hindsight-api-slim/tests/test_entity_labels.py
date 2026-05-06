@@ -922,7 +922,7 @@ def test_extraction_schema_no_labels_when_unconfigured():
 
 
 @pytest.mark.asyncio
-@pytest.mark.hs_llm_mat
+@pytest.mark.hs_llm_core
 async def test_retain_extracts_single_value_label(memory_real_llm, request_context):
     """
     End-to-end: retain content with entity_labels configured (single-value).
@@ -991,7 +991,7 @@ async def test_retain_extracts_single_value_label(memory_real_llm, request_conte
 
 
 @pytest.mark.asyncio
-@pytest.mark.hs_llm_mat
+@pytest.mark.hs_llm_core
 async def test_retain_extracts_multi_value_label(memory_real_llm, request_context):
     """
     End-to-end: retain content with a multi_value entity_labels group.
@@ -1059,7 +1059,7 @@ async def test_retain_extracts_multi_value_label(memory_real_llm, request_contex
 
 
 @pytest.mark.asyncio
-@pytest.mark.hs_llm_mat
+@pytest.mark.hs_llm_core
 async def test_retain_extracts_free_values_label(memory_real_llm, request_context):
     """
     End-to-end: retain content with a free_values entity_labels group.
