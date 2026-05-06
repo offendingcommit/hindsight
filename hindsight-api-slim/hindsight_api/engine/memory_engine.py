@@ -502,14 +502,15 @@ class MemoryEngine(MemoryEngineInterface):
         self._dialect: SQLDialect | None = None
         # Connection pool — set from backend.get_pool() for backward compatibility
         self._pool = None
-        # Optional second backend for read-only heavy queries (e.g. recall
-        # vector search). Populated in initialize() when
-        # config.read_database_url is set; otherwise aliased to self._backend
-        # so call sites are unconditional.
         self._read_backend: DatabaseBackend | None = None
+        self._read_database_url: str | None = (
+            config.read_database_url if self._database_backend_type == "postgresql" else None
+        )
         self._initialized = False
         self._pool_min_size = pool_min_size if pool_min_size is not None else config.db_pool_min_size
         self._pool_max_size = pool_max_size if pool_max_size is not None else config.db_pool_max_size
+        self._read_pool_min_size = config.read_db_pool_min_size
+        self._read_pool_max_size = config.read_db_pool_max_size
         self._db_command_timeout = db_command_timeout if db_command_timeout is not None else config.db_command_timeout
         self._db_acquire_timeout = db_acquire_timeout if db_acquire_timeout is not None else config.db_acquire_timeout
         self._db_statement_timeout = config.db_statement_timeout
@@ -1934,25 +1935,15 @@ class MemoryEngine(MemoryEngineInterface):
         # These will be migrated to use self._backend.acquire() over time.
         self._pool = self._backend.get_pool()
 
-        # Optional second backend for heavy recall queries — typically
-        # pointed at a read-replica fronted by a pgbouncer-style pooler.
-        # PostgreSQL-only; on Oracle the abstraction layer does not yet
-        # model a second pool, so we silently fall back to the primary
-        # backend. When the env var is unset (or backend is Oracle),
-        # _read_backend aliases to _backend so call sites stay
-        # unconditional and behaviour is bit-identical to before.
-        # Re-read config here because the only earlier `config = get_config()`
-        # in this method lives inside `if self._run_migrations`, which is
-        # skipped in tests and pre-migrated deployments.
-        runtime_config = get_config()
-        read_url = runtime_config.read_database_url if self._database_backend_type == "postgresql" else None
-        if read_url:
-            logger.info(f"Opening read backend against {mask_network_location(read_url)} for recall queries")
+        if self._read_database_url:
+            logger.info(
+                f"Opening read backend against {mask_network_location(self._read_database_url)} for recall queries"
+            )
             self._read_backend = create_database_backend(self._database_backend_type)
             await self._read_backend.initialize(
-                read_url,
-                min_size=self._pool_min_size,
-                max_size=self._pool_max_size,
+                self._read_database_url,
+                min_size=self._read_pool_min_size,
+                max_size=self._read_pool_max_size,
                 command_timeout=self._db_command_timeout,
                 acquire_timeout=self._db_acquire_timeout,
                 statement_cache_size=0,
@@ -2050,17 +2041,9 @@ class MemoryEngine(MemoryEngineInterface):
         return self._pool
 
     async def _get_read_backend(self) -> DatabaseBackend:
-        """Get the read-only database backend, intended for heavy SELECT
-        queries that can tolerate slight replication lag (e.g. recall's
-        vector search).
+        """Get the read-only backend (replica when configured, otherwise primary).
 
-        When ``HINDSIGHT_API_READ_DATABASE_URL`` is set, this returns a
-        dedicated backend against that URL — typically a read-replica
-        fronted by a pgbouncer-style pooler. When unset, this returns the
-        primary backend, so callers are safe regardless of configuration.
-
-        Writes MUST NOT be issued through this backend — there is no
-        guarantee the underlying server is the primary.
+        Writes MUST NOT be issued through this backend.
         """
         if not self._initialized:
             await self.initialize()
@@ -2122,9 +2105,6 @@ class MemoryEngine(MemoryEngineInterface):
             await self._http_client.aclose()
             self._http_client = None
 
-        # Close read backend first if it was a distinct backend (when
-        # read_database_url was set). When it aliases to _backend, leave it
-        # alone — _backend.shutdown() below covers it.
         if self._read_backend is not None and self._read_backend is not self._backend:
             await self._read_backend.shutdown()
         self._read_backend = None
@@ -2974,10 +2954,6 @@ class MemoryEngine(MemoryEngineInterface):
         if tracer:
             tracer.start()
 
-        # Use the read backend (replica when HINDSIGHT_API_READ_DATABASE_URL
-        # is set, otherwise the primary). Recall's vector / BM25 / graph /
-        # temporal queries are pure SELECTs and tolerate the small
-        # replication lag of an asynchronous standby.
         backend = await self._get_read_backend()
         recall_start = time.time()
 
@@ -3047,9 +3023,6 @@ class MemoryEngine(MemoryEngineInterface):
                     max_connections=effective_connection_budget,
                     operation_id=f"recall-{recall_id}",
                 ) as op:
-                    # Wrap the read backend (resolved above) — when a read
-                    # replica URL is configured, this offloads recall's heavy
-                    # SELECT traffic from the primary.
                     budgeted_pool = op.wrap_pool(backend)
                     parallel_start = time.time()
                     multi_result = await retrieve_all_fact_types_parallel(

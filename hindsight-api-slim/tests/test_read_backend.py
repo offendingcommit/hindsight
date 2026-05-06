@@ -1,25 +1,4 @@
-"""Tests for the optional read-only backend used to route heavy recall queries
-off the primary.
-
-The contract this test enforces:
-
-1. When ``HINDSIGHT_API_READ_DATABASE_URL`` is unset, ``MemoryEngine._read_backend``
-   IS the same object as ``MemoryEngine._backend`` — call sites see no
-   behavioural difference from before this feature existed. This is the
-   most important guarantee: zero-config = zero behaviour change.
-
-2. When the env var is set, a distinct backend instance is created and
-   wired as ``_read_backend``. Recall queries flow through it; writes
-   continue to flow through the primary backend.
-
-3. The recall path (``_search_with_retries``) acquires the read backend,
-   not the primary backend.
-
-Tests use the ``pg0_db_url`` fixture (a real embedded postgres) so the
-backend lifecycle is exercised end-to-end. Pointing both URLs at the same
-DB is fine for this test — we only need to verify the engine creates two
-separate backend objects, not that they live on different servers.
-"""
+"""Tests for the optional read-only backend for recall queries."""
 
 from __future__ import annotations
 
