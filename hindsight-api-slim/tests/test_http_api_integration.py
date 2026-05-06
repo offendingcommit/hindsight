@@ -1428,6 +1428,8 @@ async def test_full_api_workflow_llm_quality(api_client_real_llm):
     version verifies API plumbing, this one verifies the LLM actually reasons
     over the stored memories and produces a relevant answer.
     """
+    from tests.llm_judge import assert_meets_criteria
+
     test_bank_id = f"llm_workflow_{datetime.now().timestamp()}"
 
     # Store memories about people
@@ -1448,7 +1450,7 @@ async def test_full_api_workflow_llm_quality(api_client_real_llm):
     )
     assert response.status_code == 200
 
-    # Reflect and verify the LLM mentions stored entities
+    # Reflect and verify the LLM produces a relevant answer
     response = await api_client_real_llm.post(
         f"/v1/default/banks/{test_bank_id}/reflect",
         json={
@@ -1458,8 +1460,11 @@ async def test_full_api_workflow_llm_quality(api_client_real_llm):
     )
     assert response.status_code == 200
     result = response.json()
-    answer = result["text"].lower()
-    assert "alice" in answer, f"LLM should mention Alice in response, got: {answer[:200]}"
+    await assert_meets_criteria(
+        response=result["text"],
+        criteria="The response mentions Alice and describes her as a machine learning researcher or someone associated with Stanford.",
+        context="Stored memories: Alice is a machine learning researcher at Stanford. Bob leads the infrastructure team.",
+    )
 
     # Cleanup
     await api_client_real_llm.delete(f"/v1/default/banks/{test_bank_id}")
@@ -1474,6 +1479,8 @@ async def test_reflect_structured_output_llm_quality(api_client_real_llm):
     mock version verifies the endpoint returns a dict, this one verifies the LLM
     actually populates the schema-required keys (team_members, summary).
     """
+    from tests.llm_judge import assert_meets_criteria
+
     test_bank_id = f"llm_structured_{datetime.now().timestamp()}"
 
     # Store memories
@@ -1523,6 +1530,7 @@ async def test_reflect_structured_output_llm_quality(api_client_real_llm):
     assert response.status_code == 200
     result = response.json()
 
+    # Structural checks — these are deterministic and don't need a judge
     assert "structured_output" in result
     structured = result["structured_output"]
     assert structured is not None
@@ -1531,6 +1539,18 @@ async def test_reflect_structured_output_llm_quality(api_client_real_llm):
     assert "summary" in structured, f"structured_output missing 'summary': {structured}"
     assert isinstance(structured["team_members"], list)
     assert len(structured["team_members"]) > 0, "Should have at least one team member"
+
+    # Semantic check — verify the content is actually relevant
+    import json
+    await assert_meets_criteria(
+        response=json.dumps(structured),
+        criteria=(
+            "The team_members array includes entries for Alice (ML/machine learning role) "
+            "and Bob (data scientist role), and the summary field provides a coherent "
+            "overview. Minor embellishments or date variations are acceptable."
+        ),
+        context="Stored memories: Alice is a senior ML engineer with 8 years experience. Bob is a junior data scientist who joined last month.",
+    )
 
     # Cleanup
     await api_client_real_llm.delete(f"/v1/default/banks/{test_bank_id}")
