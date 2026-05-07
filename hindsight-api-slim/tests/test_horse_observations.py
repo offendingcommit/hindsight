@@ -337,18 +337,19 @@ async def test_horse_farm_observation_history(memory_real_llm: MemoryEngine, req
                         continue
                 print(f"  - [{item.get('fact_type', '?')}] {item.get('text', '?')}")
 
-    # Verify the mental model captures key facts
-    content_lower = content.lower()
+    # Verify the mental model captures key facts via LLM judge
+    from tests.llm_judge import assert_meets_criteria
 
-    for name in ["daisy", "buttercup", "midnight", "shadow", "twister"]:
-        assert name in content_lower, f"Mental model should mention {name}. Got:\n{content}"
-
-    assert "sold" in content_lower or "sale" in content_lower, (
-        f"Mental model should mention Buttercup was sold. Got:\n{content}"
-    )
-
-    assert "died" in content_lower or "passed" in content_lower or "death" in content_lower, (
-        f"Mental model should mention Shadow's death. Got:\n{content}"
+    await assert_meets_criteria(
+        response=content,
+        criteria=(
+            "The mental model mentions ALL of these horse names: Daisy, Buttercup, Midnight, Shadow, and Twister. "
+            "It also mentions that Buttercup was sold and that Shadow died or passed away."
+        ),
+        context=(
+            "Input events: Had 2 horses (Daisy, Buttercup). Sold Buttercup. "
+            "Got more horses (Midnight, Shadow, Twister). Shadow died."
+        ),
     )
 
     # Cleanup
