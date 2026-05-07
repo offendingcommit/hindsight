@@ -109,6 +109,20 @@ ghcr.io/vectorize-io/hindsight-api:latest-slim
 ghcr.io/vectorize-io/hindsight-control-plane:latest
 ```
 
+### Verifying image signatures
+
+Hindsight images published to GHCR are signed with [Sigstore Cosign](https://docs.sigstore.dev/cosign/signing/overview/) using keyless OIDC from the release workflow. Verification is optional — pulling and running images works without it — but recommended for production deployments that want to confirm an image was built by Vectorize from the published source.
+
+Install [cosign](https://docs.sigstore.dev/cosign/system_config/installation/), then verify any tag:
+
+```bash
+cosign verify ghcr.io/vectorize-io/hindsight:<tag> \
+  --certificate-identity-regexp '^https://github\.com/vectorize-io/hindsight/\.github/workflows/(sign-images|release)\.yml@.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+A successful run prints the signature payload and exits 0. The same command works for `hindsight-api` and `hindsight-control-plane` images. Signatures are tied to the image content (digest), not the tag — verifying a moved tag re-checks the new digest's signature automatically.
+
 ---
 
 ## Helm / Kubernetes
