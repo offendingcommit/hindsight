@@ -13,7 +13,7 @@ function createMockExecuteFunctions(
     requestImpl?: (...args: unknown[]) => unknown;
   } = {}
 ): IExecuteFunctions {
-  const requestWithAuthentication = vi.fn(options.requestImpl ?? (() => ({})));
+  const httpRequestWithAuthentication = vi.fn(options.requestImpl ?? (() => ({})));
   const fns = {
     getInputData: () => [{ json: {} }] as INodeExecutionData[],
     getCredentials: vi.fn().mockResolvedValue({
@@ -28,15 +28,15 @@ function createMockExecuteFunctions(
     getNode: vi.fn().mockReturnValue({ name: "Hindsight" }),
     continueOnFail: vi.fn().mockReturnValue(false),
     helpers: {
-      requestWithAuthentication,
+      httpRequestWithAuthentication,
     },
   };
   return fns as unknown as IExecuteFunctions;
 }
 
 function getRequestMock(fns: IExecuteFunctions): ReturnType<typeof vi.fn> {
-  return (fns as unknown as { helpers: { requestWithAuthentication: ReturnType<typeof vi.fn> } })
-    .helpers.requestWithAuthentication;
+  return (fns as unknown as { helpers: { httpRequestWithAuthentication: ReturnType<typeof vi.fn> } })
+    .helpers.httpRequestWithAuthentication;
 }
 
 describe("Hindsight node execute()", () => {

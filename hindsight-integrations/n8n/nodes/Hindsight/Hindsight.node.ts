@@ -23,7 +23,7 @@ interface HindsightCredentials {
  *  - Recall: Search a bank for memories relevant to a query
  *  - Reflect: Get an LLM-synthesized answer using the bank's memories
  *
- * HTTP calls go through n8n's built-in `requestWithAuthentication` helper
+ * HTTP calls go through n8n's built-in `httpRequestWithAuthentication` helper
  * so the package ships with zero runtime dependencies (required for n8n
  * Cloud verified-node distribution). The Bearer header is applied
  * automatically from the configured Hindsight API credential.
@@ -243,7 +243,7 @@ export class Hindsight implements INodeType {
             item.tags = tags;
           }
 
-          const response = (await this.helpers.requestWithAuthentication.call(
+          const response = (await this.helpers.httpRequestWithAuthentication.call(
             this,
             "hindsightApi",
             {
@@ -272,7 +272,7 @@ export class Hindsight implements INodeType {
             body.tags = tags;
           }
 
-          const response = (await this.helpers.requestWithAuthentication.call(
+          const response = (await this.helpers.httpRequestWithAuthentication.call(
             this,
             "hindsightApi",
             {
@@ -294,7 +294,7 @@ export class Hindsight implements INodeType {
             budget,
           };
 
-          const response = (await this.helpers.requestWithAuthentication.call(
+          const response = (await this.helpers.httpRequestWithAuthentication.call(
             this,
             "hindsightApi",
             {
