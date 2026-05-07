@@ -4,6 +4,7 @@ These tests exercise the real consolidation implementation with actual database 
 Note: Consolidation runs automatically after retain via SyncTaskBackend in tests.
 """
 
+import asyncio
 import uuid
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, call, patch
@@ -1705,6 +1706,10 @@ class TestMentalModelRefreshAfterConsolidation:
             )
             initial_refreshed_at = initial_row["last_refreshed_at"]
             initial_content = initial_row["content"]
+
+        # Small delay to ensure the retained memory's created_at is strictly after
+        # the mental model's last_refreshed_at (avoids timestamp collision in staleness check)
+        await asyncio.sleep(0.1)
 
         # Retain a memory - this triggers consolidation which should trigger mental model refresh
         await memory.retain_async(
