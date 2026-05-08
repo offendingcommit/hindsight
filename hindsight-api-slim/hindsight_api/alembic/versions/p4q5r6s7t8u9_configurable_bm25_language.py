@@ -2,8 +2,9 @@
 
 The search_vector tsvector column was originally GENERATED ALWAYS with a
 hardcoded ``to_tsvector('english', ...)`` expression. To support configurable
-``HINDSIGHT_API_BM25_LANGUAGE``, we convert it to a regular tsvector column
-that the application populates at INSERT time via ``to_tsvector($lang, ...)``.
+``HINDSIGHT_API_TEXT_SEARCH_EXTENSION_NATIVE_LANGUAGE``, we convert it to a
+regular tsvector column that the application populates at INSERT time via
+``to_tsvector($lang, ...)``.
 
 Existing rows retain their English-derived lexemes — switching the configured
 language only affects newly-written rows. Users who need to backfill existing
