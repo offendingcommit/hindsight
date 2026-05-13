@@ -994,8 +994,14 @@ def _tool_call_to_dict(tc: "LLMToolCall") -> dict[str, Any]:
             "arguments": json.dumps(tc.arguments, ensure_ascii=False),
         },
     }
+    # Gemini 3.x requires thought_signature round-trip on continuation
+    # requests. Google's OpenAI-compat shim expects the signature under
+    # tool_call.extra_content.google.thought_signature (mirroring the
+    # response shape) — not at the top level of the tool_call dict.
+    # Verified 2026-05-13 via direct continuation request to
+    # /google-ai-studio/v1beta/openai/chat/completions: HTTP 200.
     if tc.thought_signature is not None:
-        d["thought_signature"] = tc.thought_signature
+        d["extra_content"] = {"google": {"thought_signature": tc.thought_signature}}
     return d
 
 

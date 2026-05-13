@@ -897,7 +897,33 @@ class OpenAICompatibleLLM(LLMInterface):
                             args = json.loads(tc.function.arguments) if tc.function.arguments else {}
                         except json.JSONDecodeError:
                             args = {"_raw": tc.function.arguments}
-                        tool_calls.append(LLMToolCall(id=tc.id, name=tc.function.name, arguments=args))
+                        # Gemini 3.x emits a thought_signature on each tool_call under
+                        # extra_content.google.thought_signature; the API rejects any
+                        # continuation request whose echoed tool_calls don't carry it
+                        # back. The openai SDK doesn't model the field on the typed
+                        # tool_call object, so it lands in model_extra. Read it from
+                        # either spot so we can round-trip it in _tool_call_to_dict.
+                        sig: str | None = None
+                        ec = getattr(tc, "extra_content", None)
+                        if ec is None:
+                            extra = getattr(tc, "model_extra", None) or {}
+                            ec = extra.get("extra_content") if isinstance(extra, dict) else None
+                        if ec is not None:
+                            google_ec = ec.get("google") if isinstance(ec, dict) else getattr(ec, "google", None)
+                            if google_ec is not None:
+                                sig = (
+                                    google_ec.get("thought_signature")
+                                    if isinstance(google_ec, dict)
+                                    else getattr(google_ec, "thought_signature", None)
+                                )
+                        tool_calls.append(
+                            LLMToolCall(
+                                id=tc.id,
+                                name=tc.function.name,
+                                arguments=args,
+                                thought_signature=sig,
+                            )
+                        )
 
                 content = message.content
 
