@@ -370,6 +370,140 @@ class TestRetainHook:
         # With all tags dropped, retain.py sets tags=None, so "tags" is absent from item.
         assert "tags" not in item
 
+    def test_retain_tags_resolve_cwd_and_basename(self, monkeypatch, tmp_path):
+        """{cwd} resolves to hook_input.cwd; {cwd_basename} to its last segment."""
+        messages = [{"role": "user", "content": "hello"}, {"role": "assistant", "content": "world"}]
+        transcript = make_transcript_file(tmp_path, messages)
+        proj = tmp_path / "fancy-project"
+        proj.mkdir()
+        hook_input = make_hook_input(transcript_path=transcript, session_id="sess-cwd", cwd=str(proj))
+        captured = {}
+
+        def capture(req, timeout=None):
+            if "/memories" in req.full_url and "/recall" not in req.full_url:
+                captured["body"] = json.loads(req.data.decode())
+            return FakeHTTPResponse({})
+
+        _run_hook(
+            "retain", hook_input, monkeypatch, tmp_path,
+            urlopen_side_effect=capture,
+            extra_settings={"retainTags": ["folder:{cwd_basename}", "path:{cwd}"]},
+        )
+
+        item = captured["body"]["items"][0]
+        assert item["tags"] == [f"folder:fancy-project", f"path:{proj}"]
+
+    def test_retain_tags_resolve_hostname(self, monkeypatch, tmp_path):
+        """{hostname} resolves to socket.gethostname()."""
+        import socket
+        messages = [{"role": "user", "content": "hello"}, {"role": "assistant", "content": "world"}]
+        transcript = make_transcript_file(tmp_path, messages)
+        hook_input = make_hook_input(transcript_path=transcript, session_id="sess-host")
+        captured = {}
+
+        def capture(req, timeout=None):
+            if "/memories" in req.full_url and "/recall" not in req.full_url:
+                captured["body"] = json.loads(req.data.decode())
+            return FakeHTTPResponse({})
+
+        _run_hook(
+            "retain", hook_input, monkeypatch, tmp_path,
+            urlopen_side_effect=capture,
+            extra_settings={"retainTags": ["host:{hostname}"]},
+        )
+
+        item = captured["body"]["items"][0]
+        assert item["tags"] == [f"host:{socket.gethostname()}"]
+
+    def test_retain_tags_resolve_git_repo_and_branch(self, monkeypatch, tmp_path):
+        """{git_repo} and {git_branch} resolve inside a real git repo."""
+        import subprocess
+        repo = tmp_path / "demo-repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q", "-b", "trunk", str(repo)], check=True)
+        subprocess.run(["git", "-C", str(repo), "config", "user.email", "t@example.com"], check=True)
+        subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"], check=True)
+        (repo / "README").write_text("hi")
+        subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "init"], check=True)
+
+        messages = [{"role": "user", "content": "hello"}, {"role": "assistant", "content": "world"}]
+        transcript = make_transcript_file(tmp_path, messages)
+        hook_input = make_hook_input(transcript_path=transcript, session_id="sess-git", cwd=str(repo))
+        captured = {}
+
+        def capture(req, timeout=None):
+            if "/memories" in req.full_url and "/recall" not in req.full_url:
+                captured["body"] = json.loads(req.data.decode())
+            return FakeHTTPResponse({})
+
+        _run_hook(
+            "retain", hook_input, monkeypatch, tmp_path,
+            urlopen_side_effect=capture,
+            extra_settings={"retainTags": ["repo:{git_repo}", "branch:{git_branch}"]},
+        )
+
+        item = captured["body"]["items"][0]
+        assert item["tags"] == ["repo:demo-repo", "branch:trunk"]
+
+    def test_retain_tags_drop_git_outside_repo(self, monkeypatch, tmp_path):
+        """Outside a git repo, repo:/branch: tags are dropped (empty-namespace rule)."""
+        outside = tmp_path / "not-a-repo"
+        outside.mkdir()
+        messages = [{"role": "user", "content": "hello"}, {"role": "assistant", "content": "world"}]
+        transcript = make_transcript_file(tmp_path, messages)
+        hook_input = make_hook_input(transcript_path=transcript, session_id="sess-no-git", cwd=str(outside))
+        captured = {}
+
+        def capture(req, timeout=None):
+            if "/memories" in req.full_url and "/recall" not in req.full_url:
+                captured["body"] = json.loads(req.data.decode())
+            return FakeHTTPResponse({})
+
+        _run_hook(
+            "retain", hook_input, monkeypatch, tmp_path,
+            urlopen_side_effect=capture,
+            extra_settings={"retainTags": ["repo:{git_repo}", "branch:{git_branch}", "session:{session_id}"]},
+        )
+
+        item = captured["body"]["items"][0]
+        assert item["tags"] == ["session:sess-no-git"]
+
+    def test_retain_tags_drop_git_branch_on_detached_head(self, monkeypatch, tmp_path):
+        """Detached HEAD resolves {git_branch} to empty so branch: tag is dropped."""
+        import subprocess
+        repo = tmp_path / "detached-repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+        subprocess.run(["git", "-C", str(repo), "config", "user.email", "t@example.com"], check=True)
+        subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"], check=True)
+        (repo / "README").write_text("hi")
+        subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "init"], check=True)
+        sha = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+        ).stdout.strip()
+        subprocess.run(["git", "-C", str(repo), "checkout", "-q", sha], check=True)
+
+        messages = [{"role": "user", "content": "hello"}, {"role": "assistant", "content": "world"}]
+        transcript = make_transcript_file(tmp_path, messages)
+        hook_input = make_hook_input(transcript_path=transcript, session_id="sess-detach", cwd=str(repo))
+        captured = {}
+
+        def capture(req, timeout=None):
+            if "/memories" in req.full_url and "/recall" not in req.full_url:
+                captured["body"] = json.loads(req.data.decode())
+            return FakeHTTPResponse({})
+
+        _run_hook(
+            "retain", hook_input, monkeypatch, tmp_path,
+            urlopen_side_effect=capture,
+            extra_settings={"retainTags": ["repo:{git_repo}", "branch:{git_branch}"]},
+        )
+
+        item = captured["body"]["items"][0]
+        assert item["tags"] == ["repo:detached-repo"]
+
     def test_retain_custom_metadata(self, monkeypatch, tmp_path):
         """retainMetadata config should be merged with built-in metadata."""
         messages = [{"role": "user", "content": "hello"}, {"role": "assistant", "content": "world"}]

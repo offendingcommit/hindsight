@@ -19,6 +19,8 @@ Exit codes:
 
 import json
 import os
+import socket
+import subprocess
 import sys
 import time
 
@@ -33,6 +35,58 @@ from lib.content import (
 )
 from lib.daemon import get_api_url
 from lib.state import increment_turn_count, track_retention
+
+GIT_SUBPROCESS_TIMEOUT_SECONDS = 2
+
+
+def _run_git(cwd: str, *args: str) -> str:
+    """Run a git command in cwd. Return stdout (stripped) or empty string on any failure.
+
+    Failure modes that resolve to "":
+      - cwd does not exist or is not readable
+      - git is not installed
+      - cwd is not inside a git repository
+      - command times out
+      - git exits non-zero (detached HEAD, etc.)
+    """
+    if not cwd or not os.path.isdir(cwd):
+        return ""
+    try:
+        result = subprocess.run(
+            ["git", "-C", cwd, *args],
+            capture_output=True,
+            text=True,
+            timeout=GIT_SUBPROCESS_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()
+
+
+def _build_template_vars(
+    session_id: str, bank_id: str, cwd: str
+) -> dict:
+    """Resolve all template variables for retainTags / retainMetadata.
+
+    See README "Template variables for retainTags and retainMetadata" for the
+    canonical list and semantics.
+    """
+    git_branch = _run_git(cwd, "rev-parse", "--abbrev-ref", "HEAD")
+    if git_branch == "HEAD":
+        git_branch = ""
+    return {
+        "session_id": session_id,
+        "bank_id": bank_id,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "user_id": os.environ.get("HINDSIGHT_USER_ID", ""),
+        "cwd": cwd or "",
+        "cwd_basename": os.path.basename(cwd) if cwd else "",
+        "hostname": socket.gethostname(),
+        "git_repo": os.path.basename(_run_git(cwd, "rev-parse", "--show-toplevel")),
+        "git_branch": git_branch,
+    }
 
 
 def read_transcript(transcript_path: str) -> list:
@@ -175,13 +229,12 @@ def run_retain(hook_input: dict, force: bool = False) -> None:
         document_id = session_id if chunk_index == 0 else f"{session_id}-c{chunk_index}"
 
     # Resolve template variables in tags and metadata.
-    # Supported variables: {session_id}, {bank_id}, {timestamp}, {user_id}
-    template_vars = {
-        "session_id": session_id,
-        "bank_id": bank_id,
-        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "user_id": os.environ.get("HINDSIGHT_USER_ID", ""),
-    }
+    # See _build_template_vars for the supported variable list.
+    template_vars = _build_template_vars(
+        session_id=session_id,
+        bank_id=bank_id,
+        cwd=hook_input.get("cwd", ""),
+    )
 
     def _resolve_template(value: str) -> str:
         for k, v in template_vars.items():

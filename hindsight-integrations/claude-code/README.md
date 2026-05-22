@@ -243,7 +243,7 @@ Auto-retain runs after Claude responds. It extracts the conversation transcript 
 | `retainOverlapTurns` | — | `2` | When chunked retention fires, this many extra turns from the previous chunk are included for continuity. Total window size = `retainEveryNTurns + retainOverlapTurns`. |
 | `retainRoles` | — | `["user", "assistant"]` | Which message roles to include in the retained transcript. |
 | `retainToolCalls` | — | `true` | Whether to include tool calls (function invocations and results) in the retained transcript. Captures structured actions like file reads, searches, and code edits. |
-| `retainTags` | — | `["{session_id}"]` | Tags attached to the retained document. Supports template placeholders: `{session_id}`, `{bank_id}`, `{timestamp}`, and `{user_id}` (resolved from `HINDSIGHT_USER_ID` env var; empty string if unset). Tags whose resolved form ends in an empty namespace part (e.g. `"user:"` when `HINDSIGHT_USER_ID` is unset) are dropped from the outgoing request. See [Template variables](#template-variables-for-retaintags-and-retainmetadata) below. |
+| `retainTags` | — | `["{session_id}"]` | Tags attached to the retained document. Supports template placeholders: `{session_id}`, `{bank_id}`, `{timestamp}`, `{user_id}`, `{cwd}`, `{cwd_basename}`, `{hostname}`, `{git_repo}`, and `{git_branch}`. Tags whose resolved form ends in an empty namespace part (e.g. `"user:"` when `HINDSIGHT_USER_ID` is unset, or `"branch:"` outside a git repo) are dropped from the outgoing request. See [Template variables](#template-variables-for-retaintags-and-retainmetadata) below. |
 | `retainMetadata` | — | `{}` | Arbitrary key-value metadata attached to the retained document. Same template placeholders as `retainTags`. |
 | `retainContext` | — | `"claude-code"` | A label attached to retained memories identifying their source. Useful when multiple integrations write to the same bank. |
 
@@ -255,6 +255,17 @@ Auto-retain runs after Claude responds. It extracts the conversation transcript 
 | `{bank_id}` | Resolved bank ID (per `bankGranularity`) |
 | `{timestamp}` | ISO 8601 UTC at retain time |
 | `{user_id}` | Value of `HINDSIGHT_USER_ID` env var (empty string if unset) |
+| `{cwd}` | Absolute working directory at retain time (from the hook input) |
+| `{cwd_basename}` | Last path segment of `{cwd}` (the folder name) |
+| `{hostname}` | `socket.gethostname()` for the machine running the hook |
+| `{git_repo}` | Basename of `git rev-parse --show-toplevel` against `{cwd}` (empty when not in a git repo) |
+| `{git_branch}` | `git rev-parse --abbrev-ref HEAD` against `{cwd}` (empty when not in a repo or on a detached HEAD) |
+
+`{git_repo}` and `{git_branch}` invoke `git` as a subprocess (2s timeout each).
+If `git` is not installed, `{cwd}` is not a directory, or the command fails
+for any reason, the variable resolves to an empty string and any tag using the
+empty-namespace pattern (`"repo:{git_repo}"` → `"repo:"`) is dropped from the
+outgoing retain request — same behavior as `{user_id}`.
 
 ##### Example: per-user memory scoping
 
@@ -271,6 +282,31 @@ outgoing retain request and the rest of the tags are sent as-is — so the same
 
 Downstream, `recall` can filter by `tags=["user:alice"]` to isolate memories
 authored by a specific user from a shared bank.
+
+##### Example: project + branch scoping
+
+```json
+{
+  "retainTags": [
+    "session:{session_id}",
+    "user:{user_id}",
+    "repo:{git_repo}",
+    "branch:{git_branch}",
+    "host:{hostname}"
+  ],
+  "retainMetadata": {
+    "cwd": "{cwd}",
+    "git_repo": "{git_repo}",
+    "git_branch": "{git_branch}"
+  }
+}
+```
+
+Outside a git repo the `repo:` and `branch:` tags are dropped automatically,
+so the same `settings.json` works for any working directory. Downstream,
+`recall(tags=["repo:offendingcommit-site", "branch:main"])` isolates memories
+captured while working on a specific branch of a specific repo within a
+shared bank.
 
 ---
 
